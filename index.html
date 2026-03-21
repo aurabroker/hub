@@ -1,1 +1,578 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aura HUB — Centrum Zarządzania</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300..700;1,300..700&subset=latin-ext&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+  <style>
+    :root {
+      /* Kolorystyka bazy z panel.html */
+      --color-primary: #0f172a;
+      --color-primary-hover: #1e293b;
+      --color-surface: #ffffff;
+      --color-surface-offset: #f8fafc;
+      --color-border: #e2e8f0;
+      --color-text: #0f172a;
+      --color-text-muted: #64748b;
+      --color-text-faint: #94a3b8;
+      --color-error: #ef4444;
+      --color-success: #10b981;
+      --color-warning: #f59e0b;
+      
+      /* Kolory dla domen */
+      --c-gwarancje: #01696f;
+      --c-utrata: #eab308;
+      --c-idzik: #8b5cf6;
+      --c-grupowe: #3b82f6;
 
+      --radius-sm: 0.375rem;
+      --radius-md: 0.5rem;
+      --radius-lg: 0.75rem;
+      --text-xs: 0.75rem;
+      --text-sm: 0.875rem;
+      --text-base: 1rem;
+      --text-lg: 1.125rem;
+      --text-xl: 1.25rem;
+      --space-1: .25rem;
+      --space-2: .5rem;
+      --space-3: .75rem;
+      --space-4: 1rem;
+      --space-5: 1.25rem;
+      --space-6: 1.5rem;
+      --space-8: 2rem;
+      --font-body: 'Inter', sans-serif;
+      --font-display: 'Inter', sans-serif;
+      --transition: 180ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    
+    [data-theme="dark"] {
+      --color-primary: #f8fafc;
+      --color-primary-hover: #e2e8f0;
+      --color-surface: #0f172a;
+      --color-surface-offset: #1e293b;
+      --color-border: #334155;
+      --color-text: #f8fafc;
+      --color-text-muted: #94a3b8;
+      --color-text-faint: #64748b;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: var(--font-body); background-color: var(--color-surface-offset); color: var(--color-text); line-height: 1.5; -webkit-font-smoothing: antialiased; }
+    
+    h1, h2, h3 { font-family: var(--font-display); font-weight: 600; color: var(--color-text); }
+    .page-title { font-size: 1.75rem; letter-spacing: -0.02em; margin-bottom: var(--space-2); }
+    .page-subtitle { font-size: var(--text-sm); color: var(--color-text-muted); margin-bottom: var(--space-8); }
+    
+    .app-container { display: flex; min-height: 100vh; }
+    
+    .sidebar { width: 260px; background: var(--color-surface); border-right: 1px solid var(--color-border); display: flex; flex-direction: column; padding: var(--space-6) var(--space-4); flex-shrink: 0; }
+    .brand { display: flex; align-items: center; gap: var(--space-3); font-size: 1.1rem; font-weight: 700; color: var(--color-text); margin-bottom: var(--space-8); padding: 0 var(--space-2); letter-spacing: -0.02em; }
+    .brand span { color: var(--color-text-muted); font-weight: 400; }
+    
+    .nav-section { margin-bottom: var(--space-6); }
+    .nav-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; color: var(--color-text-faint); margin-bottom: var(--space-2); padding-left: var(--space-3); }
+    .nav-item { display: flex; align-items: center; gap: var(--space-3); width: 100%; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); color: var(--color-text-muted); font-size: var(--text-sm); font-weight: 500; text-decoration: none; transition: var(--transition); border: none; background: transparent; cursor: pointer; text-align: left; }
+    .nav-item:hover { background: var(--color-surface-offset); color: var(--color-text); }
+    .nav-item.active { background: var(--color-primary); color: var(--color-surface); }
+    
+    .main-content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    .topbar { height: 64px; background: var(--color-surface); border-bottom: 1px solid var(--color-border); display: flex; align-items: center; justify-content: space-between; padding: 0 var(--space-8); position: sticky; top: 0; z-index: 10; }
+    
+    .content-area { padding: var(--space-8); max-width: 1200px; margin: 0 auto; width: 100%; }
+    .page { display: none; animation: fadeIn 0.3s ease; }
+    .page.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+    
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-4); margin-bottom: var(--space-8); }
+    .kpi-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: var(--space-5); }
+    .kpi-label { font-size: var(--text-sm); color: var(--color-text-muted); font-weight: 500; margin-bottom: var(--space-2); }
+    .kpi-value { font-size: 2rem; font-weight: 600; font-family: var(--font-display); letter-spacing: -0.02em; line-height: 1; margin-bottom: var(--space-1); }
+    .kpi-sub { font-size: var(--text-xs); color: var(--color-text-faint); }
+    
+    .table-wrap { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); margin-bottom: var(--space-8); overflow: hidden; }
+    .table-toolbar { display: flex; justify-content: space-between; align-items: center; padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--color-border); }
+    .tbl { width: 100%; border-collapse: collapse; text-align: left; }
+    .tbl th, .tbl td { padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--color-border); font-size: var(--text-sm); }
+    .tbl th { background: var(--color-surface-offset); font-weight: 600; color: var(--color-text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .tbl tr:last-child td { border-bottom: none; }
+    .tbl tr:hover td { background: var(--color-surface-offset); }
+    
+    .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 9999px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+    .badge-success { background: oklch(from var(--color-success) l c h / 0.1); color: var(--color-success); }
+    .badge-warning { background: oklch(from var(--color-warning) l c h / 0.1); color: var(--color-warning); }
+    .badge-primary { background: oklch(from var(--color-primary) l c h / 0.1); color: var(--color-primary); }
+    .badge-muted { background: var(--color-border); color: var(--color-text-muted); }
+    
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); border-radius: var(--radius-md); font-size: var(--text-sm); font-weight: 500; cursor: pointer; transition: var(--transition); border: 1px solid transparent; }
+    .btn-primary { background: var(--color-primary); color: var(--color-surface); }
+    .btn-primary:hover { background: var(--color-primary-hover); }
+    .btn-ghost { background: transparent; color: var(--color-text); border-color: var(--color-border); }
+    .btn-ghost:hover { background: var(--color-surface-offset); }
+    .btn-icon { padding: var(--space-2); background: transparent; border: none; color: var(--color-text-muted); cursor: pointer; border-radius: var(--radius-sm); }
+    .btn-icon:hover { background: var(--color-surface-offset); color: var(--color-text); }
+    
+    .form-field { margin-bottom: var(--space-4); }
+    .form-row { display: flex; gap: var(--space-4); }
+    .form-row .form-field { flex: 1; }
+    .form-label { display: block; font-size: var(--text-sm); font-weight: 500; margin-bottom: var(--space-1); color: var(--color-text); }
+    .form-input, .form-select, .form-textarea { width: 100%; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); font-family: inherit; font-size: var(--text-sm); background: var(--color-surface); color: var(--color-text); transition: border-color var(--transition); }
+    .form-textarea { resize: vertical; min-height: 100px; }
+    .form-input:focus, .form-select:focus, .form-textarea:focus { outline: none; border-color: var(--color-primary); }
+    
+    .modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.4); backdrop-filter: blur(2px); display: none; align-items: center; justify-content: center; z-index: 100; opacity: 0; transition: opacity 0.2s; padding: var(--space-4); }
+    .modal-overlay.open { display: flex; opacity: 1; }
+    .modal { background: var(--color-surface); border-radius: var(--radius-lg); width: 100%; max-width: 600px; max-height: 90vh; display: flex; flex-direction: column; transform: scale(0.95); transition: transform 0.2s; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
+    .modal-overlay.open .modal { transform: scale(1); }
+    .modal-header { padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--color-border); display: flex; justify-content: space-between; align-items: center; }
+    .modal-title { font-size: var(--text-lg); margin: 0; }
+    .modal-body { padding: var(--space-5); overflow-y: auto; }
+    .modal-footer { padding: var(--space-4) var(--space-5); border-top: 1px solid var(--color-border); display: flex; justify-content: flex-end; gap: var(--space-3); background: var(--color-surface-offset); border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
+
+    .domain-tag { font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: 600; display: inline-block; }
+    .d-aura { background: oklch(from var(--color-primary) l c h / 0.1); color: var(--color-primary); }
+    .d-gwar { background: oklch(from var(--c-gwarancje) l c h / 0.1); color: var(--c-gwarancje); }
+    .d-utrata { background: oklch(from var(--c-utrata) l c h / 0.1); color: var(--c-utrata); }
+    .d-idzik { background: oklch(from var(--c-idzik) l c h / 0.1); color: var(--c-idzik); }
+    .d-grupowe { background: oklch(from var(--c-grupowe) l c h / 0.1); color: var(--c-grupowe); }
+
+    .chart-bar-container { height: 160px; display: flex; align-items: flex-end; gap: 8px; margin-top: var(--space-4); }
+    .chart-bar { flex: 1; background: var(--color-primary); border-radius: 4px 4px 0 0; min-width: 20px; transition: height 0.5s; position: relative; }
+    .chart-bar:hover { opacity: 0.8; }
+    .chart-label { position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%); font-size: 10px; color: var(--color-text-faint); }
+  </style>
+</head>
+<body>
+
+  <div class="app-container">
+    
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+      <div class="brand">
+        <i data-lucide="layers" width="24" height="24" style="color:var(--color-primary)"></i>
+        Aura<span>HUB</span>
+      </div>
+      <div class="nav-section">
+        <div class="nav-label">Generalne</div>
+        <button class="nav-item active" data-page="dashboard" onclick="navTo('dashboard')"><i data-lucide="layout-dashboard" width="18" height="18"></i> Pulpit</button>
+        <button class="nav-item" data-page="analytics" onclick="navTo('analytics')"><i data-lucide="bar-chart-2" width="18" height="18"></i> Analityka Ruchu</button>
+      </div>
+      <div class="nav-section">
+        <div class="nav-label">Zarządzanie Treścią</div>
+        <button class="nav-item" data-page="articles" onclick="navTo('articles')"><i data-lucide="file-text" width="18" height="18"></i> Artykuły i Blogi</button>
+        <button class="nav-item" data-page="social" onclick="navTo('social')"><i data-lucide="share-2" width="18" height="18"></i> Social Media</button>
+      </div>
+      <div class="nav-section">
+        <div class="nav-label">Ustawienia</div>
+        <button class="nav-item" data-page="users" onclick="navTo('users')"><i data-lucide="users" width="18" height="18"></i> Użytkownicy</button>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <div class="main-content">
+      <header class="topbar">
+        <div style="font-weight: 500; font-size: var(--text-sm); color: var(--color-text-muted)">Zalogowano jako: admin@auraconsulting.pl</div>
+        <div>
+          <button class="btn btn-ghost" id="btn-theme" title="Zmień motyw"><i data-lucide="moon" width="18" height="18"></i></button>
+        </div>
+      </header>
+
+      <main class="content-area">
+        
+        <!-- DASHBOARD -->
+        <div class="page active" id="page-dashboard">
+          <h1 class="page-title">Pulpit główny</h1>
+          <p class="page-subtitle">Przegląd aktywności w całym ekosystemie Aura Consulting.</p>
+          
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-label">Ruch z dzisiaj (wszystkie domeny)</div>
+              <div class="kpi-value">1,248</div>
+              <div class="kpi-sub"><span style="color:var(--color-success)">↑ 12%</span> względem wczoraj</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Opublikowane Artykuły</div>
+              <div class="kpi-value">42</div>
+              <div class="kpi-sub">Ostatni: 2 dni temu (gwarancje.pro)</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Posty oczekujące (Social)</div>
+              <div class="kpi-value" style="color:var(--color-warning)">5</div>
+              <div class="kpi-sub">Zaplanowane na ten tydzień</div>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 2fr 1fr; gap: var(--space-8)">
+            <div class="table-wrap">
+              <div class="table-toolbar">
+                <h3 style="font-size: var(--text-base); margin:0">Ostatnie publikacje</h3>
+              </div>
+              <table class="tbl">
+                <thead><tr><th>Treść</th><th>Domena/Kanał</th><th>Data</th><th>Status</th></tr></thead>
+                <tbody>
+                  <tr>
+                    <td><strong>Nowe limity dla branży budowlanej</strong><br><span style="font-size:11px;color:var(--color-text-muted)">Artykuł blogowy</span></td>
+                    <td><span class="domain-tag d-gwar">gwarancje.pro</span></td>
+                    <td>Dzisiaj, 09:30</td>
+                    <td><span class="badge badge-success">Opublikowano</span></td>
+                  </tr>
+                  <tr>
+                    <td><strong>Jak ubezpieczyć utratę dochodu b2b?</strong><br><span style="font-size:11px;color:var(--color-text-muted)">Artykuł poradnikowy</span></td>
+                    <td><span class="domain-tag d-utrata">utratadochodu.com</span></td>
+                    <td>Wczoraj, 14:00</td>
+                    <td><span class="badge badge-success">Opublikowano</span></td>
+                  </tr>
+                  <tr>
+                    <td><strong>Dołączyliśmy do programu Liderzy Biznesu!</strong><br><span style="font-size:11px;color:var(--color-text-muted)">Post (LinkedIn)</span></td>
+                    <td><span class="domain-tag d-aura">LinkedIn</span></td>
+                    <td>Jutro, 10:00</td>
+                    <td><span class="badge badge-warning">Zaplanowany</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="table-wrap" style="padding: var(--space-5)">
+              <h3 style="font-size: var(--text-base); margin-bottom: var(--space-4)">Szybkie akcje</h3>
+              <div style="display: flex; flex-direction: column; gap: var(--space-3)">
+                <button class="btn btn-primary" onclick="navTo('articles'); openModal('modal-article')" style="justify-content: flex-start"><i data-lucide="pen-tool" width="16" height="16"></i> Napisz nowy artykuł</button>
+                <button class="btn btn-ghost" onclick="navTo('social'); openModal('modal-social')" style="justify-content: flex-start"><i data-lucide="share" width="16" height="16"></i> Zaplanuj post do SoMe</button>
+                <button class="btn btn-ghost" onclick="navTo('analytics')" style="justify-content: flex-start"><i data-lucide="pie-chart" width="16" height="16"></i> Zobacz pełne raporty</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ANALYTICS -->
+        <div class="page" id="page-analytics">
+          <h1 class="page-title">Analityka Ruchu</h1>
+          <p class="page-subtitle">Wizyty, unikalni użytkownicy i źródła dla Twoich projektów (dane z ostatnich 30 dni).</p>
+          
+          <div class="table-wrap">
+            <div class="table-toolbar">
+              <h3>Ruch wg Domen</h3>
+              <select class="form-select" style="width:auto; padding:4px 8px"><option>Ostatnie 30 dni</option><option>Ten rok</option></select>
+            </div>
+            <table class="tbl">
+              <thead><tr><th>Strona internetowa</th><th style="text-align:right">Odsłony</th><th style="text-align:right">Unikalni (UU)</th><th style="text-align:right">Czas na stronie</th><th>Trend (M/M)</th></tr></thead>
+              <tbody>
+                <tr><td><span class="domain-tag d-aura">auraconsulting.pl</span></td><td style="text-align:right">12,450</td><td style="text-align:right">8,200</td><td style="text-align:right">2m 14s</td><td><span style="color:var(--color-success)">+4.2%</span></td></tr>
+                <tr><td><span class="domain-tag d-gwar">gwarancje.pro</span></td><td style="text-align:right">8,930</td><td style="text-align:right">5,100</td><td style="text-align:right">1m 45s</td><td><span style="color:var(--color-success)">+12.1%</span></td></tr>
+                <tr><td><span class="domain-tag d-utrata">utratadochodu.com</span></td><td style="text-align:right">15,200</td><td style="text-align:right">11,050</td><td style="text-align:right">3m 05s</td><td><span style="color:var(--color-warning)">-1.5%</span></td></tr>
+                <tr><td><span class="domain-tag d-grupowe">grupowe.pro</span></td><td style="text-align:right">4,100</td><td style="text-align:right">2,800</td><td style="text-align:right">1m 10s</td><td><span style="color:var(--color-success)">+8.0%</span></td></tr>
+                <tr><td><span class="domain-tag d-idzik">idzik.org.pl</span></td><td style="text-align:right">2,300</td><td style="text-align:right">1,900</td><td style="text-align:right">1m 30s</td><td><span style="color:var(--color-success)">+2.4%</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Dummy Chart UI -->
+          <div class="table-wrap" style="padding: var(--space-5)">
+            <h3 style="font-size: var(--text-base); margin-bottom: var(--space-4)">Całkowity ruch (wykres demonstracyjny)</h3>
+            <div class="chart-bar-container">
+              <div class="chart-bar" style="height: 30%"><span class="chart-label">01</span></div>
+              <div class="chart-bar" style="height: 40%"><span class="chart-label">05</span></div>
+              <div class="chart-bar" style="height: 60%"><span class="chart-label">10</span></div>
+              <div class="chart-bar" style="height: 50%"><span class="chart-label">15</span></div>
+              <div class="chart-bar" style="height: 80%"><span class="chart-label">20</span></div>
+              <div class="chart-bar" style="height: 100%"><span class="chart-label">25</span></div>
+              <div class="chart-bar" style="height: 70%"><span class="chart-label">30</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ARTICLES -->
+        <div class="page" id="page-articles">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start">
+            <div>
+              <h1 class="page-title">Artykuły i Blogi</h1>
+              <p class="page-subtitle">Zarządzaj wpisami na wszystkich prowadzonych stronach.</p>
+            </div>
+            <button class="btn btn-primary" onclick="openModal('modal-article')"><i data-lucide="plus" width="18" height="18"></i> Dodaj artykuł</button>
+          </div>
+          
+          <div class="table-wrap">
+            <div class="table-toolbar">
+              <div style="display:flex; gap:10px">
+                <select class="form-select" style="padding:4px 8px; width:auto"><option>Wszystkie domeny</option><option>auraconsulting.pl</option><option>gwarancje.pro</option></select>
+                <select class="form-select" style="padding:4px 8px; width:auto"><option>Wszystkie statusy</option><option>Opublikowane</option><option>Szkice</option></select>
+              </div>
+            </div>
+            <table class="tbl">
+              <thead><tr><th>Tytuł artykułu</th><th>Strona docelowa</th><th>Status</th><th>Data Publikacji</th><th>Akcje</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td><strong>Nowe limity dla branży budowlanej</strong></td>
+                  <td><span class="domain-tag d-gwar">gwarancje.pro</span></td>
+                  <td><span class="badge badge-success">Opublikowano</span></td>
+                  <td>2026-03-21</td>
+                  <td><button class="btn-icon"><i data-lucide="edit" width="16" height="16"></i></button> <button class="btn-icon"><i data-lucide="trash-2" width="16" height="16"></i></button></td>
+                </tr>
+                <tr>
+                  <td><strong>Jak ubezpieczyć utratę dochodu b2b?</strong></td>
+                  <td><span class="domain-tag d-utrata">utratadochodu.com</span></td>
+                  <td><span class="badge badge-success">Opublikowano</span></td>
+                  <td>2026-03-20</td>
+                  <td><button class="btn-icon"><i data-lucide="edit" width="16" height="16"></i></button> <button class="btn-icon"><i data-lucide="trash-2" width="16" height="16"></i></button></td>
+                </tr>
+                <tr>
+                  <td><strong>Zmiany w prawie cywilnym 2026</strong></td>
+                  <td><span class="domain-tag d-idzik">idzik.org.pl</span></td>
+                  <td><span class="badge badge-muted">Szkic</span></td>
+                  <td>—</td>
+                  <td><button class="btn-icon"><i data-lucide="edit" width="16" height="16"></i></button> <button class="btn-icon"><i data-lucide="trash-2" width="16" height="16"></i></button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- SOCIAL MEDIA -->
+        <div class="page" id="page-social">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start">
+            <div>
+              <h1 class="page-title">Social Media</h1>
+              <p class="page-subtitle">Harmonogram i publikacja postów w mediach społecznościowych.</p>
+            </div>
+            <button class="btn btn-primary" onclick="openModal('modal-social')"><i data-lucide="plus" width="18" height="18"></i> Zaplanuj post</button>
+          </div>
+
+          <div class="table-wrap">
+            <table class="tbl">
+              <thead><tr><th>Treść posta</th><th>Kanały</th><th>Data zaplanowana</th><th>Status</th><th>Akcje</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td style="max-width:300px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">Z dumą ogłaszamy dołączenie do programu Liderzy Biznesu...</td>
+                  <td><i data-lucide="linkedin" width="16" height="16" style="color:#0a66c2; vertical-align:middle"></i> LinkedIn</td>
+                  <td><strong>Jutro, 10:00</strong></td>
+                  <td><span class="badge badge-warning">Oczekuje</span></td>
+                  <td><button class="btn-icon"><i data-lucide="edit" width="16" height="16"></i></button> <button class="btn-icon"><i data-lucide="trash-2" width="16" height="16"></i></button></td>
+                </tr>
+                <tr>
+                  <td style="max-width:300px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">Przypominamy: Wadium w formie gwarancji oszczędza gotówkę! 🏢</td>
+                  <td><i data-lucide="facebook" width="16" height="16" style="color:#1877f2; vertical-align:middle"></i> Facebook</td>
+                  <td>2026-03-24, 08:30</td>
+                  <td><span class="badge badge-warning">Oczekuje</span></td>
+                  <td><button class="btn-icon"><i data-lucide="edit" width="16" height="16"></i></button> <button class="btn-icon"><i data-lucide="trash-2" width="16" height="16"></i></button></td>
+                </tr>
+                <tr>
+                  <td style="max-width:300px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">Krótka relacja z wczorajszej konferencji ubezpieczeniowej...</td>
+                  <td><i data-lucide="instagram" width="16" height="16" style="color:#e1306c; vertical-align:middle"></i> Instagram</td>
+                  <td>2026-03-15, 12:00</td>
+                  <td><span class="badge badge-success">Opublikowano</span></td>
+                  <td><button class="btn-icon"><i data-lucide="eye" width="16" height="16"></i></button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- USERS -->
+        <div class="page" id="page-users">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start">
+            <div>
+              <h1 class="page-title">Użytkownicy Ekosystemu</h1>
+              <p class="page-subtitle">Zarządzaj zespołem redakcyjnym, analitykami i uprawnieniami.</p>
+            </div>
+            <button class="btn btn-primary" onclick="openModal('modal-user')"><i data-lucide="user-plus" width="18" height="18"></i> Dodaj osobę</button>
+          </div>
+
+          <div class="table-wrap">
+            <table class="tbl">
+              <thead><tr><th>Imię i nazwisko / Email</th><th>Rola w HUB-ie</th><th>Dostęp do domen</th><th>Akcje</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td><strong>Jan Kowalski</strong><br><span style="font-size:11px;color:var(--color-text-muted)">admin@auraconsulting.pl</span></td>
+                  <td><span class="badge badge-primary">Super Admin</span></td>
+                  <td>Wszystkie</td>
+                  <td><button class="btn-icon"><i data-lucide="edit" width="16" height="16"></i></button></td>
+                </tr>
+                <tr>
+                  <td><strong>Anna Nowak</strong><br><span style="font-size:11px;color:var(--color-text-muted)">anna@gwarancje.pro</span></td>
+                  <td><span class="badge badge-success">Redaktor</span></td>
+                  <td><span class="domain-tag d-gwar">gwarancje.pro</span></td>
+                  <td><button class="btn-icon"><i data-lucide="edit" width="16" height="16"></i></button> <button class="btn-icon"><i data-lucide="trash-2" width="16" height="16"></i></button></td>
+                </tr>
+                <tr>
+                  <td><strong>Marek Idzik</strong><br><span style="font-size:11px;color:var(--color-text-muted)">kancelaria@idzik.org.pl</span></td>
+                  <td><span class="badge badge-muted">Gość (tylko odczyt)</span></td>
+                  <td><span class="domain-tag d-idzik">idzik.org.pl</span></td>
+                  <td><button class="btn-icon"><i data-lucide="edit" width="16" height="16"></i></button> <button class="btn-icon"><i data-lucide="trash-2" width="16" height="16"></i></button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD ARTICLE -->
+  <div class="modal-overlay" id="modal-article">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title">Dodaj nowy artykuł</h2>
+        <button class="btn-icon" onclick="closeModal('modal-article')"><i data-lucide="x" width="18" height="18"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-field">
+          <label class="form-label">Gdzie opublikować?</label>
+          <select class="form-select">
+            <option>auraconsulting.pl</option>
+            <option>gwarancje.pro</option>
+            <option>utratadochodu.com</option>
+            <option>grupowe.pro</option>
+            <option>idzik.org.pl</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Tytuł artykułu</label>
+          <input class="form-input" type="text" placeholder="Wpisz chwytliwy tytuł...">
+        </div>
+        <div class="form-field">
+          <label class="form-label">Treść (HTML / Markdown)</label>
+          <textarea class="form-textarea" placeholder="Zacznij pisać..."></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-field">
+            <label class="form-label">Status</label>
+            <select class="form-select"><option>Szkic (Nie publikuj)</option><option>Opublikuj od razu</option></select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modal-article')">Anuluj</button>
+        <button class="btn btn-primary"><i data-lucide="save" width="16" height="16"></i> Zapisz Artykuł</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD SOCIAL POST -->
+  <div class="modal-overlay" id="modal-social">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title">Zaplanuj Post Social Media</h2>
+        <button class="btn-icon" onclick="closeModal('modal-social')"><i data-lucide="x" width="18" height="18"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-field">
+          <label class="form-label">Kanały publikacji</label>
+          <div style="display:flex; gap:16px; margin-top:8px;">
+            <label style="display:flex; align-items:center; gap:4px; font-size:14px; cursor:pointer"><input type="checkbox" checked> <i data-lucide="facebook" width="16" height="16"></i> FB</label>
+            <label style="display:flex; align-items:center; gap:4px; font-size:14px; cursor:pointer"><input type="checkbox" checked> <i data-lucide="linkedin" width="16" height="16"></i> LinkedIn</label>
+            <label style="display:flex; align-items:center; gap:4px; font-size:14px; cursor:pointer"><input type="checkbox"> <i data-lucide="instagram" width="16" height="16"></i> IG</label>
+          </div>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Treść posta</label>
+          <textarea class="form-textarea" placeholder="Co słychać? Możesz używać emoji 😊"></textarea>
+        </div>
+        <div class="form-field">
+          <label class="form-label">URL Obrazka (Grafika do posta)</label>
+          <input class="form-input" type="url" placeholder="https://...">
+        </div>
+        <div class="form-row">
+          <div class="form-field">
+            <label class="form-label">Data publikacji</label>
+            <input class="form-input" type="date">
+          </div>
+          <div class="form-field">
+            <label class="form-label">Godzina</label>
+            <input class="form-input" type="time">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modal-social')">Anuluj</button>
+        <button class="btn btn-primary"><i data-lucide="calendar" width="16" height="16"></i> Zaplanuj</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD USER -->
+  <div class="modal-overlay" id="modal-user">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title">Dodaj użytkownika</h2>
+        <button class="btn-icon" onclick="closeModal('modal-user')"><i data-lucide="x" width="18" height="18"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <div class="form-field">
+            <label class="form-label">Imię i nazwisko</label>
+            <input class="form-input" type="text" placeholder="Jan Kowalski">
+          </div>
+          <div class="form-field">
+            <label class="form-label">Adres E-mail</label>
+            <input class="form-input" type="email" placeholder="jan@auraconsulting.pl">
+          </div>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Rola w systemie</label>
+          <select class="form-select">
+            <option>Redaktor (może pisać i planować posty)</option>
+            <option>Super Admin (pełen dostęp)</option>
+            <option>Gość (tylko odczyt statystyk)</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Ogranicz dostęp do domen (Zostaw puste = wszystkie)</label>
+          <select class="form-select" multiple style="height: 100px">
+            <option>auraconsulting.pl</option>
+            <option>gwarancje.pro</option>
+            <option>utratadochodu.com</option>
+            <option>grupowe.pro</option>
+            <option>idzik.org.pl</option>
+          </select>
+          <span style="font-size:11px; color:var(--color-text-muted); display:block; margin-top:4px">Przytrzymaj CTRL aby zaznaczyć wiele.</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modal-user')">Anuluj</button>
+        <button class="btn btn-primary"><i data-lucide="user-plus" width="16" height="16"></i> Utwórz konto</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Inicjalizacja Ikon Lucide
+    lucide.createIcons();
+
+    // Dark/Light Mode
+    document.getElementById('btn-theme').addEventListener('click', () => {
+      const b = document.body;
+      b.dataset.theme = b.dataset.theme === 'dark' ? 'light' : 'dark';
+    });
+
+    // Nawigacja między stronami
+    function navTo(page) {
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      
+      const navEl = document.querySelector(`[data-page="${page}"]`);
+      if(navEl) navEl.classList.add('active');
+      
+      const pageEl = document.getElementById(`page-${page}`);
+      if(pageEl) pageEl.classList.add('active');
+    }
+
+    // Obsługa Modali
+    function openModal(id) {
+      document.getElementById(id).classList.add('open');
+    }
+    
+    function closeModal(id) {
+      document.getElementById(id).classList.remove('open');
+    }
+
+    document.querySelectorAll('.modal-overlay').forEach(m => {
+      m.addEventListener('click', e => { 
+        if(e.target === m) m.classList.remove('open'); 
+      });
+    });
+  </script>
+</body>
+</html>
