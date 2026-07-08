@@ -8,7 +8,7 @@ crons = ["*/2 * * * *"]
 
 [vars]
 # Publiczny adres aplikacji Aura HUB (Cloudflare Pages)
-HUB_URL = "https://hub.example.com"
+HUB_URL = "https://hub.auraexpert.pl"
 
 # Sekret ustaw przez: wrangler secret put QUEUE_CRON_SECRET
 # (ta sama wartość co w env aplikacji)
