@@ -1,0 +1,14 @@
+name = "aura-hub-queue-cron"
+main = "index.ts"
+compatibility_date = "2026-06-01"
+
+# Co 2 minuty przetwarza partię kolejki wysyłki
+[triggers]
+crons = ["*/2 * * * *"]
+
+[vars]
+# Publiczny adres aplikacji Aura HUB (Cloudflare Pages)
+HUB_URL = "https://hub.example.com"
+
+# Sekret ustaw przez: wrangler secret put QUEUE_CRON_SECRET
+# (ta sama wartość co w env aplikacji)
