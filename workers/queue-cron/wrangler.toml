@@ -12,3 +12,4 @@ HUB_URL = "https://hub.auraexpert.pl"
 
 # Sekret ustaw przez: wrangler secret put QUEUE_CRON_SECRET
 # (ta sama wartość co w env aplikacji)
+_SECRETiq90_SECRETxy76
