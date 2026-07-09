@@ -18,6 +18,6 @@ export const POST: RequestHandler = async ({ request, url }) => {
 	}
 
 	const limit = Math.min(Number.parseInt(url.searchParams.get('limit') ?? '20', 10) || 20, 50);
-	const result = await processQueue(adminClient(), limit);
+	const result = await processQueue(adminClient(), url.origin, limit);
 	return json(result);
 };

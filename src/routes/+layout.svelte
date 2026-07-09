@@ -35,6 +35,16 @@
 		if (href === '/') return page.url.pathname === '/';
 		return page.url.pathname === href || page.url.pathname.startsWith(href + '/');
 	}
+
+	let theme = $state('light');
+	$effect(() => {
+		theme = document.documentElement.dataset.theme ?? 'light';
+	});
+	function toggleTheme() {
+		theme = theme === 'dark' ? 'light' : 'dark';
+		document.documentElement.dataset.theme = theme;
+		localStorage.setItem('theme', theme);
+	}
 </script>
 
 {#if data.userEmail}
@@ -56,9 +66,19 @@
 		<div class="main-content">
 			<header class="topbar">
 				<div>Zalogowano jako: <strong>{data.userEmail}</strong></div>
-				<form method="POST" action="/logout">
-					<button class="btn btn-ghost" type="submit">Wyloguj</button>
-				</form>
+				<div style="display: flex; gap: var(--space-2); align-items: center">
+					<button
+						class="btn btn-ghost"
+						type="button"
+						onclick={toggleTheme}
+						title="Przełącz motyw jasny/ciemny"
+					>
+						{theme === 'dark' ? '☀️' : '🌙'}
+					</button>
+					<form method="POST" action="/logout">
+						<button class="btn btn-ghost" type="submit">Wyloguj</button>
+					</form>
+				</div>
 			</header>
 			<main class="content-area">
 				{@render children()}

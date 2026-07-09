@@ -91,25 +91,72 @@ async function categoryAssetIds(db: SupabaseClient, categoryId: string): Promise
 	return (data ?? []).map((r) => r.asset_id as string);
 }
 
-/** Pobiera pliki z prywatnego bucketa i koduje Base64 (snapshot z email_attachments). */
-async function buildAttachments(
+interface SnapshotAsset {
+	asset_id: string;
+	storage_path: string;
+	filename: string;
+	size_bytes: number | null;
+}
+
+/** Snapshot plików przypiętych do wiadomości (email_attachments → email_assets). */
+async function loadSnapshotAssets(
 	db: SupabaseClient,
 	messageId: string
-): Promise<{ attachments: ResendAttachment[]; error?: string }> {
+): Promise<{ assets: SnapshotAsset[]; error?: string }> {
 	const { data, error } = await db
 		.from('email_attachments')
 		.select('asset_id, email_assets ( storage_path, filename, size_bytes )')
 		.eq('message_id', messageId);
-	if (error) return { attachments: [], error: `email_attachments: ${error.message}` };
+	if (error) return { assets: [], error: `email_attachments: ${error.message}` };
 
 	const assets = (data ?? [])
-		.map((r) => r.email_assets as unknown as { storage_path: string; filename: string; size_bytes: number | null })
-		.filter(Boolean);
+		.map((r) => {
+			const a = r.email_assets as unknown as Omit<SnapshotAsset, 'asset_id'> | null;
+			return a ? { asset_id: r.asset_id as string, ...a } : null;
+		})
+		.filter((a): a is SnapshotAsset => a !== null);
+	return { assets };
+}
+
+function escapeHtml(value: string): string {
+	return value
+		.replaceAll('&', '&amp;')
+		.replaceAll('<', '&lt;')
+		.replaceAll('>', '&gt;')
+		.replaceAll('"', '&quot;');
+}
+
+/**
+ * Przygotowuje pliki wiadomości zależnie od trybu kategorii:
+ * - 'attachments' → pobranie z prywatnego bucketa + Base64 (limit ~28 MB),
+ * - 'links' → lekki mail bez załączników; zmienna szablonu {{{pliki_html}}}
+ *   z listą linków do pobrania przez publiczny endpoint /files/{asset_id}.
+ */
+async function prepareFiles(
+	db: SupabaseClient,
+	messageId: string,
+	mode: string,
+	origin: string
+): Promise<{ attachments: ResendAttachment[]; variables: Record<string, string>; error?: string }> {
+	const { assets, error } = await loadSnapshotAssets(db, messageId);
+	if (error) return { attachments: [], variables: {}, error };
+	if (assets.length === 0) return { attachments: [], variables: { pliki_html: '' } };
+
+	if (mode === 'links') {
+		const items = assets
+			.map(
+				(a) =>
+					`<li style="margin: 4px 0"><a href="${origin}/files/${a.asset_id}">${escapeHtml(a.filename)}</a></li>`
+			)
+			.join('');
+		return { attachments: [], variables: { pliki_html: `<ul style="padding-left: 18px">${items}</ul>` } };
+	}
 
 	const total = assets.reduce((sum, a) => sum + (a.size_bytes ?? 0), 0);
 	if (total > MAX_ATTACHMENT_TOTAL_BYTES) {
 		return {
 			attachments: [],
+			variables: {},
 			error: `Łączny rozmiar załączników ${(total / 1024 / 1024).toFixed(1)} MB przekracza bezpieczny limit ~28 MB`
 		};
 	}
@@ -118,14 +165,18 @@ async function buildAttachments(
 	for (const asset of assets) {
 		const { data: blob, error: dlError } = await db.storage.from(BUCKET).download(asset.storage_path);
 		if (dlError || !blob) {
-			return { attachments: [], error: `Nie udało się pobrać ${asset.storage_path}: ${dlError?.message ?? 'brak pliku'}` };
+			return {
+				attachments: [],
+				variables: {},
+				error: `Nie udało się pobrać ${asset.storage_path}: ${dlError?.message ?? 'brak pliku'}`
+			};
 		}
 		attachments.push({
 			filename: asset.filename,
 			content: bytesToBase64(new Uint8Array(await blob.arrayBuffer()))
 		});
 	}
-	return { attachments };
+	return { attachments, variables: { pliki_html: '' } };
 }
 
 /**
@@ -154,9 +205,14 @@ export interface SendOutcome {
 
 /**
  * Wysyła pojedynczą wiadomość z kolejki: szablon Resend kategorii +
- * załączniki-snapshot z biblioteki, aktualizuje status i loguje do crm_history.
+ * pliki (załączniki albo linki wg trybu kategorii), aktualizuje status
+ * i loguje do crm_history. `origin` = baza publicznych linków do plików.
  */
-export async function sendMessageNow(db: SupabaseClient, messageId: string): Promise<SendOutcome> {
+export async function sendMessageNow(
+	db: SupabaseClient,
+	messageId: string,
+	origin: string
+): Promise<SendOutcome> {
 	const { data: current, error: loadError } = await db
 		.from('email_messages')
 		.select('*')
@@ -197,7 +253,12 @@ export async function sendMessageNow(db: SupabaseClient, messageId: string): Pro
 	if (!from) return fail('Brak adresu nadawcy (RESEND_FROM / kategoria / kampania)');
 	const subject = campaign?.subject || category.subject || undefined;
 
-	const { attachments, error: attachError } = await buildAttachments(db, messageId);
+	const { attachments, variables: fileVariables, error: attachError } = await prepareFiles(
+		db,
+		messageId,
+		(category.attachment_mode as string) ?? 'attachments',
+		origin
+	);
 	if (attachError) return fail(attachError);
 
 	const result = await sendResendEmail({
@@ -205,7 +266,7 @@ export async function sendMessageNow(db: SupabaseClient, messageId: string): Pro
 		to: message.to_email as string,
 		subject,
 		templateId: category.resend_template_id,
-		variables: (message.variables_json ?? {}) as Record<string, string>,
+		variables: { ...((message.variables_json ?? {}) as Record<string, string>), ...fileVariables },
 		attachments
 	});
 	if (!result.ok) return fail(result.error ?? 'Nieznany błąd Resend');
@@ -286,7 +347,8 @@ export interface QuickSendResult {
 export async function quickSend(
 	db: SupabaseClient,
 	toEmail: string,
-	categoryIds: string[]
+	categoryIds: string[],
+	origin: string
 ): Promise<QuickSendResult[]> {
 	const { data: categories, error } = await db
 		.from('email_categories')
@@ -316,7 +378,7 @@ export async function quickSend(
 				variables: companyVariables(company as CrmCompany | null),
 				rodoSnapshot: (company as CrmCompany | null)?.rodo ?? null
 			});
-			const outcome = await sendMessageNow(db, messageId);
+			const outcome = await sendMessageNow(db, messageId, origin);
 			results.push({
 				categoryId: category.id,
 				code: category.code,
@@ -510,7 +572,11 @@ export interface ProcessResult {
  * Wysyłka pojedynczo z throttlingiem pod limity Resend; nieudane wracają do
  * kolejki do wyczerpania prób (MAX_ATTEMPTS), potem status 'failed'.
  */
-export async function processQueue(db: SupabaseClient, limit = 20): Promise<ProcessResult> {
+export async function processQueue(
+	db: SupabaseClient,
+	origin: string,
+	limit = 20
+): Promise<ProcessResult> {
 	// Uruchom zaplanowane kampanie, którym minął termin
 	const { data: due } = await db
 		.from('email_campaigns')
@@ -536,7 +602,7 @@ export async function processQueue(db: SupabaseClient, limit = 20): Promise<Proc
 
 	for (const [index, row] of (batch ?? []).entries()) {
 		if (index > 0) await sleep(SEND_DELAY_MS);
-		const outcome = await sendMessageNow(db, row.id as string);
+		const outcome = await sendMessageNow(db, row.id as string, origin);
 		if (outcome.skipped) continue;
 		result.processed++;
 		if (row.campaign_id) campaignIds.add(row.campaign_id as string);

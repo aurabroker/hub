@@ -9,11 +9,13 @@
 
 <h1 class="page-title">Kategorie wysyłki</h1>
 <p class="page-subtitle">
-	Sekcje = „co wysyłamy”. Każda kategoria ma szablon Resend, temat, nadawcę i domyślne załączniki
-	(przypinane w bibliotece). W szablonie Resend użyj wbudowanej zmiennej
-	<span class="mono">{'{{{UNSUBSCRIBE_URL}}}'}</span> jako linku wypisu oraz zmiennych
-	<span class="mono">firma</span>, <span class="mono">kontakt</span>, <span class="mono">miasto</span>,
-	<span class="mono">nip</span>.
+	Sekcje = „co wysyłamy”. Każda kategoria ma szablon Resend, temat, nadawcę i domyślne pliki
+	(przypinane w bibliotece) — wysyłane jako załączniki albo linki do pobrania. W szablonie Resend
+	użyj wbudowanej zmiennej <span class="mono">{'{{{UNSUBSCRIBE_URL}}}'}</span> jako linku wypisu,
+	zmiennych <span class="mono">{'{{firma}}'}</span>, <span class="mono">{'{{kontakt}}'}</span>,
+	<span class="mono">{'{{miasto}}'}</span>, <span class="mono">{'{{nip}}'}</span>, a w trybie
+	linków wstaw <span class="mono">{'{{{pliki_html}}}'}</span> tam, gdzie ma się pojawić lista
+	plików. Gotowa stopka do wklejenia: <span class="mono">docs/email-footer.html</span> w repo.
 </p>
 
 {#if form?.error}
@@ -22,6 +24,46 @@
 {#if form?.success}
 	<div class="alert alert-success">{form.success}</div>
 {/if}
+
+<form class="card" method="POST" action="?/create" use:enhance style="border-style: dashed">
+	<h3 style="margin-bottom: var(--space-3)">➕ Nowy typ maila (kategoria)</h3>
+	<p class="form-hint" style="margin-bottom: var(--space-4)">
+		Napisz i opublikuj szablon w Resend, a tutaj utwórz kategorię z jego ID — pojawi się w
+		szybkiej wysyłce i kampaniach. Załączniki przypniesz w bibliotece.
+	</p>
+	<div class="form-row">
+		<div class="form-field">
+			<label class="form-label" for="new-name">Nazwa (etykieta w UI)</label>
+			<input class="form-input" id="new-name" name="name" required placeholder="np. Oferta wakacyjna" />
+		</div>
+		<div class="form-field">
+			<label class="form-label" for="new-code">Kod (małe litery, bez spacji)</label>
+			<input class="form-input mono" id="new-code" name="code" required placeholder="np. oferta_wakacyjna" />
+		</div>
+		<div class="form-field">
+			<label class="form-label" for="new-tpl">Szablon Resend (id lub alias)</label>
+			<input class="form-input mono" id="new-tpl" name="resend_template_id" placeholder="UUID szablonu" />
+		</div>
+	</div>
+	<div class="form-row">
+		<div class="form-field">
+			<label class="form-label" for="new-subject">Temat maila</label>
+			<input class="form-input" id="new-subject" name="subject" />
+		</div>
+		<div class="form-field">
+			<label class="form-label" for="new-mode">Pliki w mailu</label>
+			<select class="form-select" id="new-mode" name="attachment_mode">
+				<option value="attachments">Załączniki (pliki w mailu)</option>
+				<option value="links">Linki do pobrania (lekki mail)</option>
+			</select>
+		</div>
+		<div class="form-field" style="max-width: 120px">
+			<label class="form-label" for="new-sort">Kolejność</label>
+			<input class="form-input" id="new-sort" name="sort_order" type="number" value="100" />
+		</div>
+	</div>
+	<button class="btn btn-primary" type="submit">Utwórz kategorię</button>
+</form>
 
 {#each data.categories as category (category.id)}
 	<form class="card" method="POST" action="?/update" use:enhance>
@@ -67,6 +109,17 @@
 					value={category.from_email ?? ''}
 					placeholder="Aura Consulting <biuro@...>"
 				/>
+			</div>
+			<div class="form-field">
+				<label class="form-label" for="mode-{category.id}">Pliki w mailu</label>
+				<select class="form-select" id="mode-{category.id}" name="attachment_mode">
+					<option value="attachments" selected={category.attachment_mode !== 'links'}>
+						Załączniki (pliki w mailu)
+					</option>
+					<option value="links" selected={category.attachment_mode === 'links'}>
+						Linki do pobrania (lekki mail — wymaga {'{{{pliki_html}}}'} w szablonie)
+					</option>
+				</select>
 			</div>
 			<div class="form-field" style="max-width: 120px">
 				<label class="form-label" for="sort-{category.id}">Kolejność</label>

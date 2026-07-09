@@ -78,7 +78,6 @@
 				<tr>
 					<th>Nazwa</th>
 					<th>Plik w mailu</th>
-					<th>Typ</th>
 					<th class="num">Rozmiar</th>
 					<th>Przypięte kategorie</th>
 					<th>Akcje</th>
@@ -89,7 +88,6 @@
 					<tr>
 						<td><strong>{asset.name}</strong></td>
 						<td class="mono">{asset.filename}</td>
-						<td class="muted">{asset.content_type ?? '—'}</td>
 						<td class="num">{formatSize(asset.size_bytes)}</td>
 						<td>
 							{#if editingAsset === asset.id}
@@ -144,7 +142,7 @@
 						</td>
 					</tr>
 				{:else}
-					<tr><td colspan="6" class="muted">Biblioteka jest pusta — wgraj pierwszy plik.</td></tr>
+					<tr><td colspan="5" class="muted">Biblioteka jest pusta — wgraj pierwszy plik.</td></tr>
 				{/each}
 			</tbody>
 		</table>

@@ -3,7 +3,7 @@ import { env as publicEnv } from '$env/dynamic/public';
 import { redirect, type Handle } from '@sveltejs/kit';
 
 /** Ścieżki dostępne bez zalogowanego administratora. */
-const PUBLIC_PREFIXES = ['/login', '/api/webhooks/', '/api/cron/'];
+const PUBLIC_PREFIXES = ['/login', '/api/webhooks/', '/api/cron/', '/files/'];
 
 export const handle: Handle = async ({ event, resolve }) => {
 	// Czytelny komunikat zamiast błędu 500, gdy brakuje konfiguracji środowiska

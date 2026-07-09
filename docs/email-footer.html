@@ -1,0 +1,34 @@
+<!--
+  STOPKA MAILI AURA HUB
+  =====================
+  Resend nie skleja stopki automatycznie — przy szablonach hostowanych treść
+  maila w 100% pochodzi z szablonu. Dlatego stopkę wklejamy RAZ na końcu
+  KAŻDEGO szablonu w Resend (Templates -> edycja -> tryb HTML -> wklej przed
+  zamknięciem </body>, potem Publish).
+
+  Przed użyciem uzupełnij dane w nawiasach kwadratowych.
+  {{{UNSUBSCRIBE_URL}}} to wbudowana zmienna Resend - zostaw bez zmian.
+-->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+	style="margin-top: 32px; border-top: 1px solid #e2e8f0;">
+	<tr>
+		<td style="padding: 20px 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; line-height: 1.6; color: #64748b;">
+			<p style="margin: 0 0 8px 0;">
+				<strong style="color: #0f172a;">Aura Consulting</strong> — ubezpieczenia dla biznesu<br />
+				[ulica i numer], [kod pocztowy] [miasto] · NIP: [NIP]<br />
+				tel. [telefon] · <a href="mailto:biuro@auraexpert.pl" style="color: #01696f;">biuro@auraexpert.pl</a>
+				· <a href="https://auraexpert.pl" style="color: #01696f;">auraexpert.pl</a>
+			</p>
+			<p style="margin: 0 0 8px 0;">
+				Otrzymujesz tę wiadomość, ponieważ Twoje dane znajdują się w bazie kontaktów
+				Aura Consulting (zapis przez formularz na naszych stronach lub wcześniejszy kontakt).
+				Administratorem danych osobowych jest [pełna nazwa podmiotu]. Więcej w
+				<a href="https://auraexpert.pl/polityka-prywatnosci" style="color: #01696f;">polityce prywatności</a>.
+			</p>
+			<p style="margin: 0;">
+				Nie chcesz otrzymywać takich wiadomości?
+				<a href="{{{UNSUBSCRIBE_URL}}}" style="color: #01696f;">Wypisz się jednym kliknięciem</a>.
+			</p>
+		</td>
+	</tr>
+</table>

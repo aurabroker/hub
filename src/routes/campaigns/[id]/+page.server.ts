@@ -74,8 +74,8 @@ export const actions: Actions = {
 	},
 
 	/** Ręczne przetworzenie partii kolejki (gdy cron jeszcze nie działa). */
-	process: async () => {
-		const result = await processQueue(adminClient(), 20);
+	process: async ({ url }) => {
+		const result = await processQueue(adminClient(), url.origin, 20);
 		return {
 			success: `Partia przetworzona: wysłane ${result.sent}, błędy ${result.failed}, ponowienia ${result.requeued}`
 		};

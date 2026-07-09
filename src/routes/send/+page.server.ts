@@ -26,7 +26,7 @@ export const load: PageServerLoad = async () => {
 };
 
 export const actions: Actions = {
-	default: async ({ request }) => {
+	default: async ({ request, url }) => {
 		const form = await request.formData();
 		const toEmail = String(form.get('email') ?? '').trim();
 		const categoryIds = form.getAll('categories').map(String).filter(Boolean);
@@ -38,7 +38,7 @@ export const actions: Actions = {
 			return fail(400, { error: 'Zaznacz co najmniej jedną kategorię', email: toEmail, categoryIds });
 		}
 
-		const results = await quickSend(adminClient(), toEmail, categoryIds);
+		const results = await quickSend(adminClient(), toEmail, categoryIds, url.origin);
 		return { results, email: toEmail };
 	}
 };
