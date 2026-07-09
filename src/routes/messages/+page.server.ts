@@ -3,6 +3,24 @@ import type { PageServerLoad } from './$types';
 
 const STATUSES = ['queued', 'sending', 'sent', 'failed', 'bounced', 'skipped'];
 
+interface MessageRow {
+	id: string;
+	created_at: string;
+	to_email: string;
+	company_id: number | null;
+	source: string;
+	status: string;
+	error: string | null;
+	attempts: number;
+	resend_id: string | null;
+	sent_at: string | null;
+	delivered_at: string | null;
+	opened_at: string | null;
+	clicked_at: string | null;
+	email_categories: { code: string; name: string } | null;
+	email_campaigns: { id: string; name: string } | null;
+}
+
 export const load: PageServerLoad = async ({ url }) => {
 	const db = adminClient();
 	const status = url.searchParams.get('status');
@@ -34,7 +52,8 @@ export const load: PageServerLoad = async ({ url }) => {
 	}
 
 	return {
-		messages: messages ?? [],
+		// PostgREST zwraca relacje to-one jako obiekty; bez wygenerowanych typów DB rzutujemy jawnie
+		messages: (messages ?? []) as unknown as MessageRow[],
 		categories: categories ?? [],
 		counts,
 		filters: { status, source, category: categoryId, q: search ?? '' }
