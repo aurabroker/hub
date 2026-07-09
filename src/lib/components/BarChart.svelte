@@ -29,7 +29,8 @@
 	let step = $derived(innerW / Math.max(1, data.length));
 	let barW = $derived(Math.max(3, Math.min(40, step - 2)));
 	let labelEvery = $derived(Math.max(1, Math.ceil(data.length / maxXLabels)));
-	let gridValues = $derived([0.5, 1].map((f) => Math.round(max * f)));
+	// Set usuwa duplikaty (przy max=1 obie linie siatki wypadałyby na 1)
+	let gridValues = $derived([...new Set([0.5, 1].map((f) => Math.round(max * f)))]);
 </script>
 
 {#if data.length === 0}
