@@ -3,9 +3,21 @@ import { BUCKET } from '$lib/server/sender';
 import { adminClient } from '$lib/server/supabase';
 import type { Actions, PageServerLoad } from './$types';
 
-function safeFilename(name: string): string {
+/** Nazwa widoczna w mailu — może zawierać polskie znaki; tylko bez ścieżek i znaków sterujących. */
+function displayFilename(name: string): string {
 	const base = name.split(/[\\/]/).pop() ?? 'plik';
-	return base.replace(/[^\w.\- ()À-ɏ]/g, '_').slice(0, 180);
+	return base.replace(/[\u0000-\u001f]/g, '').trim().slice(0, 180) || 'plik';
+}
+
+/** Klucz w Supabase Storage musi być ASCII — transliteracja diakrytyków + twarde czyszczenie. */
+function storageFilename(name: string): string {
+	const ascii = displayFilename(name)
+		.replace(/\u0142/g, 'l')
+		.replace(/\u0141/g, 'L')
+		.normalize('NFD')
+		.replace(/[\u0300-\u036f]/g, '');
+	const safe = ascii.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '');
+	return safe || 'plik';
 }
 
 export const load: PageServerLoad = async () => {
@@ -38,8 +50,8 @@ export const actions: Actions = {
 
 		const db = adminClient();
 		const assetId = crypto.randomUUID();
-		const filename = safeFilename(file.name);
-		const storagePath = `library/${assetId}/${filename}`;
+		const filename = displayFilename(file.name);
+		const storagePath = `library/${assetId}/${storageFilename(file.name)}`;
 
 		const { error: uploadError } = await db.storage
 			.from(BUCKET)
