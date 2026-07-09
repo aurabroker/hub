@@ -10,6 +10,7 @@ crons = ["*/2 * * * *"]
 # Publiczny adres aplikacji Aura HUB (Cloudflare Pages)
 HUB_URL = "https://hub.auraexpert.pl"
 
-# Sekret ustaw przez: wrangler secret put QUEUE_CRON_SECRET
-# (ta sama wartość co w env aplikacji)
-_SECRETiq90_SECRETxy76
+# UWAGA: sekretu NIE wpisujemy do tego pliku (trafiłby do repo).
+# Ustaw go po wdrożeniu workera przez:
+#   npx wrangler secret put QUEUE_CRON_SECRET
+# (ta sama wartość co zmienna QUEUE_CRON_SECRET w Cloudflare Pages)
