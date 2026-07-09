@@ -18,7 +18,8 @@
 			label: 'Wysyłka',
 			items: [
 				{ href: '/send', title: 'WYŚLIJ EMAIL', icon: '✉' },
-				{ href: '/campaigns', title: 'Kampanie', icon: '⇶' }
+				{ href: '/campaigns', title: 'Kampanie', icon: '⇶' },
+				{ href: '/messages', title: 'Historia wysyłek', icon: '≣' }
 			]
 		},
 		{
