@@ -50,7 +50,14 @@
 {#if data.userEmail}
 	<div class="app-container">
 		<aside class="sidebar">
-			<a class="brand" href="/">Aura<span>HUB</span></a>
+			<a class="brand" href="/" style="margin-bottom: var(--space-1)">Aura<span>HUB</span></a>
+			<div
+				class="faint mono"
+				style="font-size: 0.7rem; padding: 0 var(--space-2); margin-bottom: var(--space-6)"
+				title="Zbudowano: {new Date(__APP_BUILT_AT__).toLocaleString('pl-PL')}"
+			>
+				v{__APP_VERSION__} · {__APP_COMMIT__}
+			</div>
 			{#each nav as section (section.label)}
 				<div class="nav-section">
 					<div class="nav-label">{section.label}</div>
