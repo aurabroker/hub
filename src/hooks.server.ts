@@ -6,9 +6,18 @@ import { redirect, type Handle } from '@sveltejs/kit';
 const PUBLIC_PREFIXES = ['/login', '/api/webhooks/', '/api/cron/'];
 
 export const handle: Handle = async ({ event, resolve }) => {
+	// Czytelny komunikat zamiast błędu 500, gdy brakuje konfiguracji środowiska
+	if (!publicEnv.PUBLIC_SUPABASE_URL || !publicEnv.PUBLIC_SUPABASE_ANON_KEY) {
+		return new Response(
+			'Brak konfiguracji: dodaj zmienne PUBLIC_SUPABASE_URL oraz PUBLIC_SUPABASE_ANON_KEY ' +
+				'w Cloudflare Pages → Settings → Variables and Secrets, a następnie wykonaj redeploy.',
+			{ status: 500, headers: { 'content-type': 'text/plain; charset=utf-8' } }
+		);
+	}
+
 	event.locals.supabase = createServerClient(
-		publicEnv.PUBLIC_SUPABASE_URL ?? '',
-		publicEnv.PUBLIC_SUPABASE_ANON_KEY ?? '',
+		publicEnv.PUBLIC_SUPABASE_URL,
+		publicEnv.PUBLIC_SUPABASE_ANON_KEY,
 		{
 			cookies: {
 				getAll: () => event.cookies.getAll(),
