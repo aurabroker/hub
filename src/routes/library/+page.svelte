@@ -93,7 +93,18 @@
 						<td class="num">{formatSize(asset.size_bytes)}</td>
 						<td>
 							{#if editingAsset === asset.id}
-								<form method="POST" action="?/pin" use:enhance>
+								<form
+									method="POST"
+									action="?/pin"
+									use:enhance={() => {
+										// panel zamykamy dopiero po zakończeniu zapisu,
+										// inaczej formularz zniknąłby z DOM przed wysłaniem
+										return async ({ update }) => {
+											editingAsset = null;
+											await update();
+										};
+									}}
+								>
 									<input type="hidden" name="asset_id" value={asset.id} />
 									{#each data.categories as c (c.id)}
 										<label style="display: flex; gap: 6px; font-size: var(--text-sm); align-items: center">
@@ -107,9 +118,7 @@
 										</label>
 									{/each}
 									<div style="display: flex; gap: 6px; margin-top: 6px">
-										<button class="btn btn-primary" type="submit" onclick={() => (editingAsset = null)}>
-											Zapisz
-										</button>
+										<button class="btn btn-primary" type="submit">Zapisz</button>
 										<button class="btn btn-ghost" type="button" onclick={() => (editingAsset = null)}>
 											Anuluj
 										</button>
