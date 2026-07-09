@@ -66,7 +66,18 @@
 </form>
 
 {#each data.categories as category (category.id)}
-	<form class="card" method="POST" action="?/update" use:enhance>
+	<form
+		class="card"
+		method="POST"
+		action="?/update"
+		use:enhance={() => {
+			// bez resetu: po zapisie formularz ma pokazywać stan zapisany w bazie,
+			// a nie wartości sprzed edycji (domyślny reset udawał odrzucony zapis)
+			return async ({ update }) => {
+				await update({ reset: false });
+			};
+		}}
+	>
 		<input type="hidden" name="id" value={category.id} />
 		<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-3)">
 			<h3>
