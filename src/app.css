@@ -551,4 +551,166 @@ a {
 
 .faint {
 	color: var(--color-text-faint);
+	font-size: 0.8em;
+}
+
+/* ============================================================
+   Zapisy / Baza Klientów
+   ============================================================ */
+
+.tbl tbody tr.row-click {
+	cursor: pointer;
+}
+
+.tbl tbody tr.row-today td {
+	background: color-mix(in srgb, var(--color-success) 10%, transparent);
+}
+
+.tbl tbody tr.row-today:hover td {
+	background: color-mix(in srgb, var(--color-success) 16%, transparent);
+}
+
+.tbl tbody tr.row-today td:first-child {
+	border-left: 3px solid var(--color-success);
+}
+
+.tbl tbody tr.date-sep td {
+	background: var(--color-surface-offset);
+	font-size: 0.7rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--color-text-muted);
+	padding: var(--space-2) var(--space-5);
+}
+
+.tbl tbody tr.date-sep:hover td {
+	background: var(--color-surface-offset);
+}
+
+.tbl tbody tr.date-sep.today-sep td {
+	color: var(--color-success);
+	background: color-mix(in srgb, var(--color-success) 8%, transparent);
+}
+
+.badge-today {
+	background: var(--color-success);
+	color: #fff;
+}
+
+.btn-icon {
+	padding: var(--space-2);
+	background: transparent;
+	border: none;
+	color: var(--color-text-muted);
+	cursor: pointer;
+	border-radius: var(--radius-sm);
+	font-size: 1.25rem;
+	line-height: 1;
+}
+
+.btn-icon:hover {
+	background: var(--color-surface-offset);
+	color: var(--color-text);
+}
+
+/* ============================================================
+   Modal
+   ============================================================ */
+
+.modal-overlay {
+	position: fixed;
+	inset: 0;
+	background: rgba(15, 23, 42, 0.45);
+	backdrop-filter: blur(2px);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 100;
+	padding: var(--space-4);
+}
+
+.modal {
+	background: var(--color-surface);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-lg);
+	width: 100%;
+	max-width: 880px;
+	max-height: 90vh;
+	display: flex;
+	flex-direction: column;
+	box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+}
+
+.modal-header {
+	padding: var(--space-4) var(--space-5);
+	border-bottom: 1px solid var(--color-border);
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: var(--space-4);
+}
+
+.modal-title {
+	font-size: var(--text-lg);
+	margin: 0;
+}
+
+.modal-body {
+	padding: var(--space-5);
+	overflow-y: auto;
+}
+
+.modal-footer {
+	padding: var(--space-4) var(--space-5);
+	border-top: 1px solid var(--color-border);
+	display: flex;
+	justify-content: flex-end;
+	gap: var(--space-3);
+	background: var(--color-surface-offset);
+	border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.person-section {
+	margin-bottom: var(--space-6);
+}
+
+.person-section h4 {
+	font-size: var(--text-xs);
+	margin-bottom: var(--space-3);
+	padding-bottom: var(--space-2);
+	border-bottom: 1px solid var(--color-border);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--color-text-muted);
+}
+
+.kv-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+	gap: var(--space-3) var(--space-5);
+}
+
+.kv-label {
+	font-size: var(--text-xs);
+	color: var(--color-text-faint);
+	margin-bottom: 2px;
+}
+
+.kv-value {
+	font-size: var(--text-sm);
+	font-weight: 500;
+	word-break: break-word;
+}
+
+.person-json {
+	background: var(--color-surface-offset);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-md);
+	padding: var(--space-3);
+	font-size: 12px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	word-break: break-word;
+	font-family: ui-monospace, 'SF Mono', Menlo, monospace;
 }

@@ -15,6 +15,13 @@
 			]
 		},
 		{
+			label: 'Klienci',
+			items: [
+				{ href: '/signups', title: 'Zapisy dzienne', icon: '⋮' },
+				{ href: '/clients', title: 'Baza Klientów', icon: '⌸' }
+			]
+		},
+		{
 			label: 'Wysyłka',
 			items: [
 				{ href: '/send', title: 'WYŚLIJ EMAIL', icon: '✉' },
