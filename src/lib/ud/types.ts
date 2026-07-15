@@ -1,30 +1,22 @@
-export type UdClient = {
-	id: string;
-	created_at: string;
-	full_name: string | null;
-	email: string | null;
+export type CrmCompany = {
+	id: number;
+	company: string | null;
+	contact: string | null;
+	title: string | null;
 	phone: string | null;
-	pesel: string | null;
-	employment_type: string | null;
-	profession: string | null;
-	[key: string]: unknown;
-};
-
-export type UdContact = {
-	id: string;
-	created_at: string;
-	name: string | null;
 	email: string | null;
-	phone: string | null;
-	rodo_consent: boolean | null;
-};
-
-export type Signup = {
-	type: 'client' | 'contact';
-	id: string;
-	name: string | null;
-	email: string | null;
-	phone: string | null;
-	sub: string | null;
+	city: string | null;
+	state: string | null;
+	industry: string | null;
+	revenue: number | null;
+	employees: string | null;
+	url: string | null;
+	status: string | null;
+	assigned_to: string | null;
 	created_at: string;
+	updated_at: string | null;
+	assigned_user_id: string | null;
+	nip: string | null;
+	regon: string | null;
+	notes: string | null;
 };
