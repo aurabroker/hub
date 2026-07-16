@@ -4,7 +4,7 @@ import { quickSend } from '$lib/server/sender';
 import { adminClient } from '$lib/server/supabase';
 import type { Actions, PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async () => {
+export const load: PageServerLoad = async ({ url }) => {
 	const db = adminClient();
 	const { data: categories } = await db
 		.from('email_categories')
@@ -13,6 +13,8 @@ export const load: PageServerLoad = async () => {
 		.order('sort_order');
 
 	return {
+		// Prefill adresu przy wejściu z karty/listy Klienta: /send?email=...
+		prefillEmail: url.searchParams.get('email') ?? '',
 		categories: (categories ?? []).map((c) => ({
 			id: c.id as string,
 			code: c.code as string,

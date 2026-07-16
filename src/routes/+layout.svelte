@@ -18,7 +18,8 @@
 			label: 'Klienci',
 			items: [
 				{ href: '/signups', title: 'Zapisy dzienne', icon: '⋮' },
-				{ href: '/clients', title: 'Baza Klientów', icon: '⌸' }
+				{ href: '/clients', title: 'Baza Klientów', icon: '⌸' },
+				{ href: '/clients/kategorie', title: 'Wysyłka wg kategorii', icon: '⊞' }
 			]
 		},
 		{
@@ -38,9 +39,16 @@
 		}
 	];
 
+	const allHrefs = nav.flatMap((s) => s.items.map((i) => i.href));
+	function matchesHref(href: string): boolean {
+		const p = page.url.pathname;
+		if (href === '/') return p === '/';
+		return p === href || p.startsWith(href + '/');
+	}
 	function isActive(href: string): boolean {
-		if (href === '/') return page.url.pathname === '/';
-		return page.url.pathname === href || page.url.pathname.startsWith(href + '/');
+		// Aktywny jest tylko najgłębszy pasujący wpis (np. /clients/kategorie wygrywa z /clients).
+		if (!matchesHref(href)) return false;
+		return !allHrefs.some((h) => h !== href && h.length > href.length && matchesHref(h));
 	}
 
 	let theme = $state('light');

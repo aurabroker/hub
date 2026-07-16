@@ -62,7 +62,7 @@
 			type="email"
 			required
 			placeholder="jan.kowalski@firma.pl"
-			value={form?.email ?? ''}
+			value={form?.email ?? data.prefillEmail ?? ''}
 		/>
 		<div class="form-hint">
 			Jeśli adres istnieje w CRM, wysyłka zostanie dopisana do historii kontaktu.

@@ -19,4 +19,8 @@ export type CrmCompany = {
 	nip: string | null;
 	regon: string | null;
 	notes: string | null;
+	/** Surowy tekst zainteresowania z formularza; kategorię liczymy przez normalizeInterest(). */
+	ubezpieczenie: string | null;
+	/** Zgoda RODO (surowa wartość); interpretacja przez hasRodoConsent(). */
+	rodo: string | null;
 };

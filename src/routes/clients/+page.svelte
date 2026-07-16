@@ -1,25 +1,32 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import type { PageServerData } from './$types';
-	import type { CrmCompany } from '$lib/ud/types';
 	import { fmtDate, dayKey, todayKey } from '$lib/ud/format';
-	import PersonModal from '$lib/components/PersonModal.svelte';
+	import { normalizeInterest, CODE_LABELS } from '$lib/categories';
 
 	let { data }: { data: PageServerData } = $props();
 
 	let search = $state('');
-	let selected = $state<CrmCompany | null>(null);
 
 	const today = todayKey();
+
+	function categoryLabel(ubezpieczenie: string | null): string {
+		return CODE_LABELS[normalizeInterest(ubezpieczenie)];
+	}
 
 	let filtered = $derived.by(() => {
 		const q = search.trim().toLowerCase();
 		if (!q) return data.clients;
 		return data.clients.filter((c) =>
-			[c.company, c.contact, c.email, c.phone, c.nip, c.city, c.industry].some((v) =>
+			[c.company, c.contact, c.email, c.phone, c.nip, categoryLabel(c.ubezpieczenie)].some((v) =>
 				String(v ?? '').toLowerCase().includes(q)
 			)
 		);
 	});
+
+	function openClient(id: number) {
+		goto(`/clients/${id}`);
+	}
 </script>
 
 <svelte:head><title>Baza Klientów — Aura HUB</title></svelte:head>
@@ -27,7 +34,7 @@
 <h1 class="page-title">Baza Klientów</h1>
 <p class="page-subtitle">
 	Wszystkie kontakty z tabeli <span class="mono">crm_companies</span>. Kliknij wiersz, aby otworzyć
-	kompletną kartę Klienta.
+	pełną kartę Klienta. Kliknięcie w adres e-mail przenosi do szybkiej wysyłki z uzupełnionym adresem.
 </p>
 
 {#if data.error}
@@ -41,7 +48,7 @@
 		<input
 			class="form-input"
 			type="search"
-			placeholder="Szukaj: firma, osoba, e-mail, telefon, NIP, miasto, branża…"
+			placeholder="Szukaj: firma, osoba, e-mail, telefon, NIP, kategoria…"
 			bind:value={search}
 			style="width: 360px; max-width: 100%"
 		/>
@@ -53,32 +60,34 @@
 				<tr>
 					<th>Firma / Osoba</th>
 					<th>Kontakt</th>
-					<th>Miasto / Branża</th>
+					<th>Telefon</th>
 					<th>NIP</th>
-					<th>Status</th>
+					<th>Kategoria zapytania</th>
 					<th>Data zapisu</th>
 				</tr>
 			</thead>
 			<tbody>
 				{#each filtered as c (c.id)}
 					{@const isToday = c.created_at ? dayKey(c.created_at) === today : false}
-					<tr class="row-click" class:row-today={isToday} onclick={() => (selected = c)}>
+					<tr class="row-click" class:row-today={isToday} onclick={() => openClient(c.id)}>
 						<td>
 							<strong>{c.company ?? c.contact ?? '—'}</strong>
 							{#if c.company && c.contact}<br /><span class="faint">{c.contact}{c.title ? ' · ' + c.title : ''}</span>{/if}
 						</td>
 						<td>
-							{c.email ?? '—'}
-							{#if c.phone}<br /><span class="faint">{c.phone}</span>{/if}
+							{#if c.email}
+								<a
+									href="/send?email={encodeURIComponent(c.email)}"
+									onclick={(e) => e.stopPropagation()}
+									title="Wyślij e-mail na ten adres"
+								>{c.email}</a>
+							{:else}
+								—
+							{/if}
 						</td>
-						<td>
-							{c.city ?? '—'}
-							{#if c.industry}<br /><span class="faint">{c.industry}</span>{/if}
-						</td>
+						<td>{c.phone ?? '—'}</td>
 						<td>{c.nip ?? '—'}</td>
-						<td>
-							{#if c.status}<span class="badge badge-primary">{c.status}</span>{:else}—{/if}
-						</td>
+						<td><span class="badge badge-primary">{categoryLabel(c.ubezpieczenie)}</span></td>
 						<td style="white-space: nowrap">
 							{c.created_at ? fmtDate(c.created_at) : '—'}
 							{#if isToday}<span class="badge badge-today" style="margin-left: 6px">DZIŚ</span>{/if}
@@ -97,5 +106,3 @@
 		</table>
 	</div>
 </div>
-
-<PersonModal company={selected} onclose={() => (selected = null)} />

@@ -1,13 +1,12 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import type { PageServerData } from './$types';
 	import type { CrmCompany } from '$lib/ud/types';
 	import { dayKey, todayKey, fmtDateTime, dayLabel } from '$lib/ud/format';
-	import PersonModal from '$lib/components/PersonModal.svelte';
 
 	let { data }: { data: PageServerData } = $props();
 
 	let rangeFilter = $state<'all' | 'today' | '7' | '30'>('all');
-	let selected = $state<CrmCompany | null>(null);
 
 	const today = todayKey();
 	const now = Date.now();
@@ -65,7 +64,7 @@
 <p class="page-subtitle">
 	Codzienne zapisy do bazy kontaktów (<span class="mono">crm_companies</span>). Zapisy z dnia
 	dzisiejszego zaznaczone <strong style="color: var(--color-success)">na zielono</strong>. Kliknij
-	wiersz, aby zobaczyć wszystkie dane.
+	wiersz, aby otworzyć pełną kartę Klienta.
 </p>
 
 {#if data.error}
@@ -127,7 +126,7 @@
 						</tr>
 					{:else}
 						{@const c = row.company}
-						<tr class="row-click" class:row-today={row.today} onclick={() => (selected = c)}>
+						<tr class="row-click" class:row-today={row.today} onclick={() => goto(`/clients/${c.id}`)}>
 							<td>
 								<strong>{c.company ?? c.contact ?? '—'}</strong>
 								{#if c.company && c.contact}<br /><span class="faint">{c.contact}</span>{/if}
@@ -160,5 +159,3 @@
 		</table>
 	</div>
 </div>
-
-<PersonModal company={selected} onclose={() => (selected = null)} />

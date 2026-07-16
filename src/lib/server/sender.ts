@@ -6,6 +6,11 @@ import { sendResendEmail, type ResendAttachment } from './resend';
 export const BUCKET = 'email-assets';
 /** Resend domyślnie limituje do 2 req/s — odstęp między pojedynczymi wysyłkami. */
 export const SEND_DELAY_MS = 650;
+/**
+ * Dzienny limit realnie wysłanych maili (darmowy plan Resend). Obowiązuje łącznie
+ * dla kampanii i wysyłki „do wszystkich" wg kategorii; pierwszeństwo mają kampanie.
+ */
+export const DAILY_SEND_LIMIT = 100;
 const MAX_ATTEMPTS = 3;
 /** Base64 dokłada ~33%; cała wiadomość ma limit 40 MB. */
 const MAX_ATTACHMENT_TOTAL_BYTES = 28 * 1024 * 1024;
@@ -560,11 +565,165 @@ export async function materializeCampaign(
 	return { queued, skipped };
 }
 
+function startOfTodayIso(): string {
+	const d = new Date();
+	d.setHours(0, 0, 0, 0);
+	return d.toISOString();
+}
+
+export interface DailySendStatus {
+	limit: number;
+	sentToday: number;
+	queuedCampaign: number;
+	/** Ile z dziennego limitu zostaje po odjęciu już wysłanych dziś maili. */
+	remaining: number;
+	/** Ile realnie zostaje na wysyłkę wg kategorii po rezerwacji dla kampanii. */
+	availableForCategories: number;
+}
+
+/** Bieżące wykorzystanie dziennego limitu wysyłki (kampanie mają pierwszeństwo). */
+export async function dailySendStatus(db: SupabaseClient): Promise<DailySendStatus> {
+	const [sentRes, queuedRes] = await Promise.all([
+		db
+			.from('email_messages')
+			.select('id', { count: 'exact', head: true })
+			.eq('status', 'sent')
+			.gte('sent_at', startOfTodayIso()),
+		db
+			.from('email_messages')
+			.select('id', { count: 'exact', head: true })
+			.in('status', ['queued', 'sending'])
+			.not('campaign_id', 'is', null)
+	]);
+	const sentToday = sentRes.count ?? 0;
+	const queuedCampaign = queuedRes.count ?? 0;
+	const remaining = Math.max(0, DAILY_SEND_LIMIT - sentToday);
+	return {
+		limit: DAILY_SEND_LIMIT,
+		sentToday,
+		queuedCampaign,
+		remaining,
+		availableForCategories: Math.max(0, remaining - queuedCampaign)
+	};
+}
+
+export interface CategoryBlastResult {
+	code: string;
+	name: string;
+	matched: number;
+	enqueued: number;
+	skippedNoConsent: number;
+	skippedBadEmail: number;
+	skippedDuplicate: number;
+}
+
+/**
+ * Kolejkuje wysyłkę „do wszystkich" dla jednej kategorii: tworzy niekampanijne
+ * wiadomości (source='quick_send', status='queued') dla kontaktów z tej kategorii,
+ * które mają poprawny e-mail i zgodę RODO, a nie były jeszcze obsłużone. Realną
+ * wysyłką — z limitem dziennym i priorytetem kampanii — zajmuje się processQueue.
+ * Wstawianie hurtowe (chunk), by zmieścić się w limitach żądania serverless.
+ */
+export async function enqueueCategoryBlast(
+	db: SupabaseClient,
+	categoryId: string
+): Promise<CategoryBlastResult> {
+	const { data: category, error: catErr } = await db
+		.from('email_categories')
+		.select('*')
+		.eq('id', categoryId)
+		.eq('active', true)
+		.maybeSingle();
+	if (catErr) throw new Error(`email_categories: ${catErr.message}`);
+	if (!category) throw new Error('Nie znaleziono aktywnej kategorii');
+	const code = category.code as string;
+
+	const { data: rows, error: coErr } = await db
+		.from('crm_companies')
+		.select(COMPANY_COLUMNS)
+		.limit(20000);
+	if (coErr) throw new Error(`crm_companies: ${coErr.message}`);
+	const companies = ((rows ?? []) as CrmCompany[]).filter(
+		(c) => normalizeInterest(c.ubezpieczenie) === code
+	);
+
+	// Kontakty już obsłużone w tej kategorii: wysłane lub czekające w kolejce.
+	const { data: existing, error: exErr } = await db
+		.from('email_messages')
+		.select('company_id, status')
+		.eq('category_id', categoryId)
+		.not('company_id', 'is', null)
+		.in('status', ['queued', 'sending', 'sent']);
+	if (exErr) throw new Error(`email_messages: ${exErr.message}`);
+	const handled = new Set((existing ?? []).map((r) => r.company_id as number));
+
+	const result: CategoryBlastResult = {
+		code,
+		name: category.name as string,
+		matched: companies.length,
+		enqueued: 0,
+		skippedNoConsent: 0,
+		skippedBadEmail: 0,
+		skippedDuplicate: 0
+	};
+
+	const toInsert: Record<string, unknown>[] = [];
+	for (const c of companies) {
+		const email = (c.email ?? '').trim();
+		if (!EMAIL_RE.test(email)) {
+			result.skippedBadEmail++;
+			continue;
+		}
+		if (!hasRodoConsent(c.rodo)) {
+			result.skippedNoConsent++;
+			continue;
+		}
+		if (handled.has(c.id)) {
+			result.skippedDuplicate++;
+			continue;
+		}
+		toInsert.push({
+			campaign_id: null,
+			category_id: categoryId,
+			company_id: c.id,
+			to_email: email,
+			source: 'quick_send',
+			variables_json: companyVariables(c),
+			rodo_snapshot: c.rodo ?? null,
+			status: 'queued'
+		});
+	}
+
+	if (toInsert.length === 0) return result;
+
+	const assetIds = await categoryAssetIds(db, categoryId);
+	const CHUNK = 500;
+	for (let i = 0; i < toInsert.length; i += CHUNK) {
+		const slice = toInsert.slice(i, i + CHUNK);
+		const { data: inserted, error: insErr } = await db
+			.from('email_messages')
+			.insert(slice)
+			.select('id');
+		if (insErr) throw new Error(`email_messages insert: ${insErr.message}`);
+		result.enqueued += inserted?.length ?? 0;
+		if (assetIds.length > 0 && inserted && inserted.length > 0) {
+			const attachRows = inserted.flatMap((m) =>
+				assetIds.map((assetId) => ({ message_id: m.id as string, asset_id: assetId }))
+			);
+			const { error: attErr } = await db.from('email_attachments').insert(attachRows);
+			if (attErr) throw new Error(`email_attachments insert: ${attErr.message}`);
+		}
+	}
+	return result;
+}
+
 export interface ProcessResult {
 	processed: number;
 	sent: number;
 	failed: number;
 	requeued: number;
+	/** Osiągnięto dzienny limit wysyłki (dalsza wysyłka wznowi się jutro). */
+	dailyLimitReached?: boolean;
 }
 
 /**
@@ -588,19 +747,49 @@ export async function processQueue(
 		await db.from('email_campaigns').update({ status: 'sending' }).eq('id', campaign.id);
 	}
 
-	const { data: batch, error } = await db
+	const result: ProcessResult = { processed: 0, sent: 0, failed: 0, requeued: 0 };
+
+	// Dzienny limit (darmowy plan Resend) — liczony na realnie wysłanych dziś mailach.
+	const sentTodayRes = await db
+		.from('email_messages')
+		.select('id', { count: 'exact', head: true })
+		.eq('status', 'sent')
+		.gte('sent_at', startOfTodayIso());
+	const sentToday = sentTodayRes.count ?? 0;
+	const budget = Math.max(0, DAILY_SEND_LIMIT - sentToday);
+	const effectiveLimit = Math.min(limit, budget);
+	if (effectiveLimit <= 0) {
+		return { ...result, dailyLimitReached: true };
+	}
+
+	// Priorytet mają kampanie: najpierw bierzemy wiadomości kampanijne, a wolne
+	// miejsca w dziennym budżecie wypełniamy wysyłką „do wszystkich" (niekampanijną).
+	const { data: campaignBatch, error: cErr } = await db
 		.from('email_messages')
 		.select('id, campaign_id')
 		.eq('status', 'queued')
 		.not('campaign_id', 'is', null)
 		.order('created_at', { ascending: true })
-		.limit(limit);
-	if (error) throw new Error(`kolejka: ${error.message}`);
+		.limit(effectiveLimit);
+	if (cErr) throw new Error(`kolejka: ${cErr.message}`);
 
-	const result: ProcessResult = { processed: 0, sent: 0, failed: 0, requeued: 0 };
+	const batch = [...(campaignBatch ?? [])];
+	const remainingSlots = effectiveLimit - batch.length;
+	if (remainingSlots > 0) {
+		const { data: blastBatch, error: bErr } = await db
+			.from('email_messages')
+			.select('id, campaign_id')
+			.eq('status', 'queued')
+			.is('campaign_id', null)
+			.order('created_at', { ascending: true })
+			.limit(remainingSlots);
+		if (bErr) throw new Error(`kolejka: ${bErr.message}`);
+		batch.push(...(blastBatch ?? []));
+	}
+
 	const campaignIds = new Set<string>();
 
-	for (const [index, row] of (batch ?? []).entries()) {
+	for (const [index, row] of batch.entries()) {
 		if (index > 0) await sleep(SEND_DELAY_MS);
 		const outcome = await sendMessageNow(db, row.id as string, origin);
 		if (outcome.skipped) continue;
@@ -639,5 +828,6 @@ export async function processQueue(
 		}
 	}
 
+	result.dailyLimitReached = sentToday + result.sent >= DAILY_SEND_LIMIT;
 	return result;
 }
