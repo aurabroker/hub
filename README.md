@@ -112,13 +112,15 @@ w Gmailu) — kliknięcia to pewniejszy sygnał; dashboard opisuje otwarcia jako
 
 ## RODO (wymóg twardy)
 
-- Wysyłka masowa idzie **wyłącznie** do kontaktów ze spełnioną zgodą
-  (`email_has_rodo_consent(crm_companies.rodo)`); brak zgody → `skipped`.
-- Status zgody w momencie wysyłki jest zapisywany w `email_messages.rodo_snapshot` (audyt).
-- **Stan obecny bazy:** pole `rodo` jest puste we wszystkich rekordach, więc kampania
-  masowa pominie wszystkich odbiorców, dopóki zgody nie zostaną uzupełnione w CRM —
-  kreator kampanii pokazuje to w podglądzie. Zakres zgód potwierdźcie z osobą
-  odpowiedzialną za RODO.
+- **Zgody RODO są zebrane dla całej bazy Klientów** (potwierdzone przez właściciela
+  danych). Interpretacja zgody: `hasRodoConsent(crm_companies.rodo)` w
+  `src/lib/categories.ts` — puste/nieuzupełnione pole `rodo` liczy się jako zgoda;
+  wykluczany jest **wyłącznie wyraźny sprzeciw** (`nie`, `false`, `0`, `brak`,
+  `sprzeciw`, …, patrz `RODO_REFUSED`). Kontakt ze sprzeciwem → `skipped`.
+- Bramka RODO obowiązuje tak samo dla kampanii masowych i dla wysyłki „do wszystkich"
+  wg kategorii (`/clients/kategorie`).
+- Surowa wartość pola `rodo` z momentu wysyłki jest zapisywana w
+  `email_messages.rodo_snapshot` (audyt) — niezależnie od interpretacji.
 - Szybka wysyłka 1-do-1 jest inicjowana ręcznie przez operatora; również zawiera link
   wypisu i jest logowana.
 

@@ -46,10 +46,21 @@ export function normalizeInterest(src: string | null | undefined): CanonicalCode
 	return 'inne';
 }
 
-/** Interpretacja zgody RODO — lustro SQL public.email_has_rodo_consent(text). */
+/**
+ * Wartości pola `rodo` oznaczające WYRAŹNY sprzeciw (brak zgody na wysyłkę).
+ * Tylko takie kontakty są wykluczane z wysyłki.
+ */
+export const RODO_REFUSED = ['nie', 'false', '0', 'no', 'off', 'brak', 'brak zgody', 'sprzeciw'];
+
+/**
+ * Interpretacja zgody RODO. Zgody są zebrane dla całej bazy Klientów
+ * (potwierdzone przez właściciela danych), dlatego puste/nieuzupełnione pole
+ * `rodo` traktujemy jako zgodę. Wykluczamy wyłącznie wyraźny sprzeciw
+ * (patrz RODO_REFUSED). Surowa wartość pola trafia do audytu w rodo_snapshot.
+ */
 export function hasRodoConsent(src: string | null | undefined): boolean {
 	const v = (src ?? '').trim().toLowerCase();
-	return ['tak', 'true', '1', 'yes', 'on', 'zgoda'].includes(v);
+	return !RODO_REFUSED.includes(v);
 }
 
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
