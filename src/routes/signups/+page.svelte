@@ -1,14 +1,13 @@
 <script lang="ts">
 	import type { PageServerData } from './$types';
-	import type { CrmClient } from '$lib/ud/types';
+	import type { CrmCompany } from '$lib/ud/types';
 	import { dayKey, todayKey, fmtDateTime, dayLabel } from '$lib/ud/format';
 	import PersonModal from '$lib/components/PersonModal.svelte';
 
 	let { data }: { data: PageServerData } = $props();
 
 	let rangeFilter = $state<'all' | 'today' | '7' | '30'>('all');
-	let typFilter = $state<'all' | 'firma' | 'osoba'>('all');
-	let selected = $state<CrmClient | null>(null);
+	let selected = $state<CrmCompany | null>(null);
 
 	const today = todayKey();
 	const now = Date.now();
@@ -21,7 +20,6 @@
 
 	let filtered = $derived.by(() => {
 		let list = signups;
-		if (typFilter !== 'all') list = list.filter((s) => (s.typ ?? '').toLowerCase() === typFilter);
 		if (rangeFilter === 'today') list = list.filter((s) => isToday(s.created_at));
 		else if (rangeFilter !== 'all') {
 			const days = Number(rangeFilter);
@@ -43,7 +41,7 @@
 
 	type GroupRow =
 		| { kind: 'header'; dayKey: string; label: string; today: boolean }
-		| { kind: 'row'; client: CrmClient; today: boolean };
+		| { kind: 'row'; company: CrmCompany; today: boolean };
 
 	let grouped = $derived.by(() => {
 		const rows: GroupRow[] = [];
@@ -55,7 +53,7 @@
 				rows.push({ kind: 'header', dayKey: dk, label: dayLabel(dk), today: isTodayRow });
 				lastDay = dk;
 			}
-			rows.push({ kind: 'row', client: c, today: isTodayRow });
+			rows.push({ kind: 'row', company: c, today: isTodayRow });
 		}
 		return rows;
 	});
@@ -65,9 +63,9 @@
 
 <h1 class="page-title">Zapisy dzienne</h1>
 <p class="page-subtitle">
-	Codzienne zapisy Klientów do bazy CRM. Zapisy z dnia dzisiejszego zaznaczone
-	<strong style="color: var(--color-success)">na zielono</strong>. Kliknij wiersz, aby zobaczyć wszystkie
-	dane Klienta.
+	Codzienne zapisy do bazy kontaktów (<span class="mono">crm_companies</span>). Zapisy z dnia
+	dzisiejszego zaznaczone <strong style="color: var(--color-success)">na zielono</strong>. Kliknij
+	wiersz, aby zobaczyć wszystkie dane.
 </p>
 
 {#if data.error}
@@ -97,65 +95,51 @@
 	<div class="kpi-card">
 		<div class="kpi-label">Łącznie w bazie</div>
 		<div class="kpi-value">{kpi.total}</div>
-		<div class="kpi-sub">wszyscy Klienci</div>
+		<div class="kpi-sub">wszystkie kontakty</div>
 	</div>
 </div>
 
 <div class="table-wrap">
 	<div class="table-toolbar">
 		<h3>Zapisy wg dni</h3>
-		<div style="display: flex; gap: var(--space-2); flex-wrap: wrap">
-			<select class="form-select" bind:value={rangeFilter} style="width: auto">
-				<option value="all">Cały okres</option>
-				<option value="today">Tylko dziś</option>
-				<option value="7">Ostatnie 7 dni</option>
-				<option value="30">Ostatnie 30 dni</option>
-			</select>
-			<select class="form-select" bind:value={typFilter} style="width: auto">
-				<option value="all">Wszystkie typy</option>
-				<option value="firma">Firmy</option>
-				<option value="osoba">Osoby fizyczne</option>
-			</select>
-		</div>
+		<select class="form-select" bind:value={rangeFilter} style="width: auto">
+			<option value="all">Cały okres</option>
+			<option value="today">Tylko dziś</option>
+			<option value="7">Ostatnie 7 dni</option>
+			<option value="30">Ostatnie 30 dni</option>
+		</select>
 	</div>
 	<div class="table-scroll">
 		<table class="tbl">
 			<thead>
 				<tr>
-					<th>Klient</th>
+					<th>Firma / Osoba</th>
 					<th>Kontakt</th>
-					<th>NIP / PESEL</th>
-					<th>RODO</th>
+					<th>Miasto / Branża</th>
 					<th>Data zapisu</th>
 				</tr>
 			</thead>
 			<tbody>
-				{#each grouped as row (row.kind === 'header' ? 'h-' + row.dayKey : 'r-' + row.client.id)}
+				{#each grouped as row (row.kind === 'header' ? 'h-' + row.dayKey : 'r-' + row.company.id)}
 					{#if row.kind === 'header'}
 						<tr class="date-sep" class:today-sep={row.today}>
-							<td colspan="5">{row.label}</td>
+							<td colspan="4">{row.label}</td>
 						</tr>
 					{:else}
-						{@const c = row.client}
+						{@const c = row.company}
 						<tr class="row-click" class:row-today={row.today} onclick={() => (selected = c)}>
 							<td>
-								<strong>{c.nazwa ?? c.nazwa_skrocona ?? '—'}</strong>
-								{#if c.typ}<br /><span class="faint">{c.typ}</span>{/if}
+								<strong>{c.company ?? c.contact ?? '—'}</strong>
+								{#if c.company && c.contact}<br /><span class="faint">{c.contact}</span>{/if}
+								{#if c.nip}<br /><span class="faint">NIP: {c.nip}</span>{/if}
 							</td>
 							<td>
 								{c.email ?? '—'}
-								{#if c.telefon}<br /><span class="faint">{c.telefon}</span>{/if}
+								{#if c.phone}<br /><span class="faint">{c.phone}</span>{/if}
 							</td>
 							<td>
-								{c.nip ?? c.pesel ?? '—'}
-								{#if c.regon}<br /><span class="faint">REGON: {c.regon}</span>{/if}
-							</td>
-							<td>
-								{#if c.rodo_zgoda}
-									<span class="badge badge-success">Tak</span>
-								{:else}
-									<span class="badge badge-muted">Brak</span>
-								{/if}
+								{c.city ?? '—'}
+								{#if c.industry}<br /><span class="faint">{c.industry}</span>{/if}
 							</td>
 							<td style="white-space: nowrap">
 								{fmtDateTime(c.created_at)}
@@ -165,8 +149,10 @@
 					{/if}
 				{:else}
 					<tr>
-						<td colspan="5" class="muted" style="text-align: center; padding: var(--space-8)">
-							Brak zapisów w wybranym zakresie.
+						<td colspan="4" class="muted" style="text-align: center; padding: var(--space-8)">
+							{signups.length === 0
+								? 'Baza crm_companies jest jeszcze pusta — pierwszy zapis pojawi się tu automatycznie.'
+								: 'Brak zapisów w wybranym zakresie.'}
 						</td>
 					</tr>
 				{/each}
@@ -175,4 +161,4 @@
 	</div>
 </div>
 
-<PersonModal client={selected} onclose={() => (selected = null)} />
+<PersonModal company={selected} onclose={() => (selected = null)} />

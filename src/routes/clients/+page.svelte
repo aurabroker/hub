@@ -1,13 +1,13 @@
 <script lang="ts">
 	import type { PageServerData } from './$types';
-	import type { CrmClient } from '$lib/ud/types';
+	import type { CrmCompany } from '$lib/ud/types';
 	import { fmtDate, dayKey, todayKey } from '$lib/ud/format';
 	import PersonModal from '$lib/components/PersonModal.svelte';
 
 	let { data }: { data: PageServerData } = $props();
 
 	let search = $state('');
-	let selected = $state<CrmClient | null>(null);
+	let selected = $state<CrmCompany | null>(null);
 
 	const today = todayKey();
 
@@ -15,8 +15,8 @@
 		const q = search.trim().toLowerCase();
 		if (!q) return data.clients;
 		return data.clients.filter((c) =>
-			[c.nazwa, c.nazwa_skrocona, c.email, c.telefon, c.nip, c.regon, c.pesel, c.ulica].some(
-				(v) => String(v ?? '').toLowerCase().includes(q)
+			[c.company, c.contact, c.email, c.phone, c.nip, c.city, c.industry].some((v) =>
+				String(v ?? '').toLowerCase().includes(q)
 			)
 		);
 	});
@@ -26,7 +26,7 @@
 
 <h1 class="page-title">Baza Klientów</h1>
 <p class="page-subtitle">
-	Wszyscy Klienci z bazy CRM (<span class="mono">crm_clients</span>). Kliknij wiersz, aby otworzyć
+	Wszystkie kontakty z tabeli <span class="mono">crm_companies</span>. Kliknij wiersz, aby otworzyć
 	kompletną kartę Klienta.
 </p>
 
@@ -41,7 +41,7 @@
 		<input
 			class="form-input"
 			type="search"
-			placeholder="Szukaj: nazwa, e-mail, telefon, NIP, REGON, PESEL, adres…"
+			placeholder="Szukaj: firma, osoba, e-mail, telefon, NIP, miasto, branża…"
 			bind:value={search}
 			style="width: 360px; max-width: 100%"
 		/>
@@ -51,11 +51,11 @@
 		<table class="tbl">
 			<thead>
 				<tr>
-					<th>Klient</th>
+					<th>Firma / Osoba</th>
 					<th>Kontakt</th>
-					<th>NIP / PESEL</th>
-					<th>Adres</th>
-					<th>Typ</th>
+					<th>Miasto / Branża</th>
+					<th>NIP</th>
+					<th>Status</th>
 					<th>Data zapisu</th>
 				</tr>
 			</thead>
@@ -64,23 +64,20 @@
 					{@const isToday = c.created_at ? dayKey(c.created_at) === today : false}
 					<tr class="row-click" class:row-today={isToday} onclick={() => (selected = c)}>
 						<td>
-							<strong>{c.nazwa ?? c.nazwa_skrocona ?? '—'}</strong>
-							{#if c.nazwa_skrocona && c.nazwa && c.nazwa_skrocona !== c.nazwa}
-								<br /><span class="faint">{c.nazwa_skrocona}</span>
-							{/if}
+							<strong>{c.company ?? c.contact ?? '—'}</strong>
+							{#if c.company && c.contact}<br /><span class="faint">{c.contact}{c.title ? ' · ' + c.title : ''}</span>{/if}
 						</td>
 						<td>
 							{c.email ?? '—'}
-							{#if c.telefon}<br /><span class="faint">{c.telefon}</span>{/if}
+							{#if c.phone}<br /><span class="faint">{c.phone}</span>{/if}
 						</td>
 						<td>
-							{c.nip ?? c.pesel ?? '—'}
-							{#if c.regon}<br /><span class="faint">REGON: {c.regon}</span>{/if}
+							{c.city ?? '—'}
+							{#if c.industry}<br /><span class="faint">{c.industry}</span>{/if}
 						</td>
-						<td>{c.ulica ?? '—'}</td>
+						<td>{c.nip ?? '—'}</td>
 						<td>
-							{#if c.typ}<span class="badge badge-primary">{c.typ}</span>{:else}—{/if}
-							{#if c.gwarancje}<br /><span class="badge badge-success" style="margin-top: 4px">gwarancje</span>{/if}
+							{#if c.status}<span class="badge badge-primary">{c.status}</span>{:else}—{/if}
 						</td>
 						<td style="white-space: nowrap">
 							{c.created_at ? fmtDate(c.created_at) : '—'}
@@ -90,7 +87,9 @@
 				{:else}
 					<tr>
 						<td colspan="6" class="muted" style="text-align: center; padding: var(--space-8)">
-							Brak Klientów spełniających kryteria.
+							{data.clients.length === 0
+								? 'Baza crm_companies jest jeszcze pusta.'
+								: 'Brak Klientów spełniających kryteria.'}
 						</td>
 					</tr>
 				{/each}
@@ -99,4 +98,4 @@
 	</div>
 </div>
 
-<PersonModal client={selected} onclose={() => (selected = null)} />
+<PersonModal company={selected} onclose={() => (selected = null)} />
