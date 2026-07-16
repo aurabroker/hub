@@ -7,19 +7,49 @@ Wewnętrzny panel do zarządzania i wysyłki spersonalizowanych maili do kontakt
 **Stack:** SvelteKit (Svelte 5, runes) · Cloudflare (Pages + Worker cron) · Supabase
 (Postgres, Storage, Auth) · Resend (API + Templates + webhooki).
 
+- **Produkcja (on-line):** https://hub.auraexpert.pl (Cloudflare Pages).
+- **Wersja produkcyjna / działająca:** commit `b1bcabd`. To jest wersja przywrócona jako
+  produkcyjna — czyta bazę klientów z tabeli `crm_companies` (spójnie z resztą HUB).
+- **Baza klientów:** dane CRM (`crm_companies`) znajdują się w projekcie **BEAUTY** w Supabase.
+  HUB tylko z niej czyta — nie modyfikuje struktury tej bazy.
+
+> ## ⛔ Autoryzacja i weryfikacja Supabase — NIE ZMIENIAĆ
+>
+> Autoryzacja oraz weryfikacja użytkowników w Supabase **działa poprawnie**. Wcześniejszy
+> problem z weryfikacją Supabase został **rozwiązany**.
+>
+> **Nie wolno wprowadzać żadnych zmian w warstwie autoryzacji/weryfikacji Supabase.**
+> Nie ma uprawnień do modyfikacji tego obszaru. Dotyczy to w szczególności:
+>
+> - konfiguracji Supabase **Auth** (providerzy, ustawienia weryfikacji/potwierdzeń, JWT, sesje),
+> - logiki logowania i bramkowania dostępu w `src/hooks.server.ts`
+>   (`supabase.auth.getUser()`, RPC `is_platform_admin`, przekierowania na `/login`),
+> - funkcji/uprawnień `public.is_platform_admin()` oraz reguł RLS decydujących o dostępie,
+> - kluczy i zmiennych środowiskowych Supabase (`PUBLIC_SUPABASE_URL`,
+>   `PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` / alias `SERVICE_ROLE`).
+>
+> To wszystko **działa** i pozostaje bez zmian.
+
+## Dostęp
+
+Panel dostępny wyłącznie dla administratorów platformy
+(`public.is_platform_admin()` → `profiles.account_type in ('super_admin','support_admin')`).
+Niezalogowani/nieuprawnieni są przekierowywani na `/login`. Publiczne trasy (bez logowania):
+`/login`, `/api/webhooks/`, `/api/cron/`, `/files/`.
+
 ## Ekrany
 
 | Trasa | Co robi |
 |---|---|
 | `/` | Dashboard: kafle (kontakty, duplikaty, wysłane, open/click rate) + wykresy (zapisy/dzień, rozkład sekcji, wysyłka/dzień) |
+| `/signups` | **Zapisy dzienne** — codzienne zapisy klientów do bazy CRM (`crm_companies`), grupowane po dniach; zapisy z dziś wyróżnione |
+| `/clients` | **Baza Klientów** — wszystkie kontakty z `crm_companies`; klik w wiersz otwiera pełną kartę klienta |
 | `/send` | **WYŚLIJ EMAIL** — szybka wysyłka 1-do-1: adres + checkboxy kategorii + SEND; każda kategoria = osobny mail z załącznikami z biblioteki |
 | `/campaigns` | Kampanie masowe: kreator (segment → kategoria → podgląd), dashboard wysyłki (postęp, statusy per odbiorca, ponowienie nieudanych) |
 | `/library` | Biblioteka załączników: upload do prywatnego bucketa, przypinanie do kategorii, pobieranie (signed URL), usuwanie |
 | `/categories` | Konfiguracja sekcji: szablon Resend, temat, nadawca, aktywność |
+| `/messages` | Log wiadomości z filtrami (status / źródło / kategoria) |
 | `/duplicates` | Grupy duplikatów wg e-mail / NIP z akcją „oznacz” (nic nie jest usuwane automatycznie) |
-
-Panel dostępny wyłącznie dla administratorów platformy
-(`public.is_platform_admin()` → `profiles.account_type in ('super_admin','support_admin')`).
 
 ## Uruchomienie
 
@@ -48,7 +78,8 @@ Zmienne środowiskowe — patrz `.env.example` (nazwy zgodne ze specyfikacją; b
 - seed kategorii kanonicznych.
 
 Tabele CRM (`crm_companies`, `crm_history`, …) nie są modyfikowane; po wysyłce dopisywany
-jest wpis `crm_history` (`type='email'`).
+jest wpis `crm_history` (`type='email'`). Migracja dotyczy wyłącznie modułu e-mail HUB —
+**nie obejmuje i nie zmienia autoryzacji Supabase** (patrz sekcja powyżej).
 
 ## Pipeline wysyłki masowej
 
@@ -105,3 +136,7 @@ w Gmailu) — kliknięcia to pewniejszy sygnał; dashboard opisuje otwarcia jako
    ustaw zmienne środowiskowe z `.env.example` w projekcie Pages.
 2. Cron: `cd workers/queue-cron && wrangler deploy`, ustaw `HUB_URL` w `wrangler.toml`
    i sekret `wrangler secret put QUEUE_CRON_SECRET` (ta sama wartość co w aplikacji).
+
+> Uwaga do wdrożeń: przywracanie/aktualizacja produkcji dotyczy **wyłącznie kodu aplikacji**.
+> Konfiguracja **autoryzacji i weryfikacji Supabase pozostaje nietknięta** (patrz sekcja
+> „Autoryzacja i weryfikacja Supabase — NIE ZMIENIAĆ").
