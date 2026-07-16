@@ -11,10 +11,11 @@
 
 <h1 class="page-title">Wysyłka wg kategorii</h1>
 <p class="page-subtitle">
-	Podgląd kategorii zapytań i wysyłka „do wszystkich" w danej kategorii. Wysyłka jest kolejkowana i
-	realizowana automatycznie z limitem <strong>{data.status.limit} maili dziennie</strong> (darmowy
-	plan Resend). <strong>Pierwszeństwo mają kampanie</strong> — wysyłka wg kategorii korzysta z tego,
-	co zostaje w dziennym limicie.
+	Kliknij nazwę kategorii, aby zobaczyć <strong>listę firm</strong>, które o nią zapytały. Wysyłka
+	„do wszystkich" jest kolejkowana i realizowana automatycznie z limitem
+	<strong>{data.status.limit} maili dziennie</strong> (darmowy plan Resend).
+	<strong>Pierwszeństwo mają kampanie</strong> — wysyłka wg kategorii korzysta z tego, co zostaje
+	w dziennym limicie.
 </p>
 
 {#if data.error}
@@ -75,10 +76,12 @@
 				{#each data.categories as c (c.id)}
 					<tr>
 						<td>
-							<strong>{c.name}</strong>
+							<a href="/clients/kategorie/{c.code}"><strong>{c.name}</strong></a>
 							<br /><span class="mono faint">{c.code}</span>
 						</td>
-						<td>{c.total}</td>
+						<td>
+							<a href="/clients/kategorie/{c.code}">{c.total}</a>
+						</td>
 						<td>
 							{#if c.eligible > 0}
 								<span class="badge badge-success">{c.eligible}</span>
