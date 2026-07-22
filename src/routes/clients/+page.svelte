@@ -63,13 +63,15 @@
 					<th>Telefon</th>
 					<th>NIP</th>
 					<th>Kategoria zapytania</th>
+					<th>Wysyłki</th>
 					<th>Data zapisu</th>
 				</tr>
 			</thead>
 			<tbody>
 				{#each filtered as c (c.id)}
 					{@const isToday = c.created_at ? dayKey(c.created_at) === today : false}
-					<tr class="row-click" class:row-today={isToday} onclick={() => openClient(c.id)}>
+					{@const stat = data.sendStats[c.id]}
+						<tr class="row-click" class:row-today={isToday} onclick={() => openClient(c.id)}>
 						<td>
 							<strong>{c.company ?? c.contact ?? '—'}</strong>
 							{#if c.company && c.contact}<br /><span class="faint">{c.contact}{c.title ? ' · ' + c.title : ''}</span>{/if}
@@ -89,13 +91,23 @@
 						<td>{c.nip ?? '—'}</td>
 						<td><span class="badge badge-primary">{categoryLabel(c.ubezpieczenie)}</span></td>
 						<td style="white-space: nowrap">
+							{#if stat && stat.sent > 0}
+								<span class="badge badge-success" title="Wysłanych maili: {stat.sent}{stat.opened > 0 ? `, otwartych: ${stat.opened}` : ''}">
+									✓ {stat.sent}{stat.opened > 0 ? ` · ${stat.opened} otw.` : ''}
+								</span>
+								{#if stat.lastSentAt}<br /><span class="faint" style="font-size: 0.8em">{fmtDate(stat.lastSentAt)}</span>{/if}
+							{:else}
+								<span class="faint">—</span>
+							{/if}
+						</td>
+						<td style="white-space: nowrap">
 							{c.created_at ? fmtDate(c.created_at) : '—'}
 							{#if isToday}<span class="badge badge-today" style="margin-left: 6px">DZIŚ</span>{/if}
 						</td>
 					</tr>
 				{:else}
 					<tr>
-						<td colspan="6" class="muted" style="text-align: center; padding: var(--space-8)">
+						<td colspan="7" class="muted" style="text-align: center; padding: var(--space-8)">
 							{data.clients.length === 0
 								? 'Baza crm_companies jest jeszcze pusta.'
 								: 'Brak Klientów spełniających kryteria.'}
