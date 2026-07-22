@@ -96,19 +96,42 @@ jest wpis `crm_history` (`type='email'`). Migracja dotyczy wyłącznie modułu e
 
 ## Resend — konfiguracja
 
-1. Zweryfikuj domenę nadawczą (SPF/DKIM/DMARC) i włącz open/click tracking (Domains).
-2. Utwórz szablony (Templates) i wpisz ich id/alias w `/categories`. W treści użyj
+1. **Domena nadawcza:** zweryfikuj SPF/DKIM/DMARC (Domains).
+2. **Śledzenie otwarć i kliknięć (Open & Click Tracking) — wymaga DWÓCH kroków, nie jednego:**
+   - włącz przełącznik trackingu dla domeny (Domains → domena → Configuration →
+     *Enable tracking metrics*), **oraz**
+   - **skonfiguruj i zweryfikuj subdomenę trackingową** (np. `links.auraexpert.pl`):
+     dodaj rekord **CNAME** w DNS, a jeśli na domenie są rekordy **CAA** — także wpis CAA
+     (potrzebny do wydania certyfikatu TLS dla subdomeny).
+
+   > ⚠️ **Bez zweryfikowanej subdomeny trackingowej Resend nie wstrzykuje piksela otwarcia,
+   > więc zdarzenia `email.opened` w ogóle nie powstają** — sam przełącznik to za mało.
+   > Tracking działa **per-domena**; API `POST /emails` nie ma pola `track_opens` — nie da
+   > się go włączyć per-wiadomość z poziomu kodu.
+3. Utwórz szablony (Templates) i wpisz ich id/alias w `/categories`. W treści użyj
    zmiennych `{{firma}}`, `{{kontakt}}`, `{{miasto}}`, `{{nip}}` oraz **wbudowanej**
    `{{{UNSUBSCRIBE_URL}}}` jako linku wypisu.
-3. Webhook: endpoint `POST /api/webhooks/resend`, subskrybuj `email.delivered`,
+4. Webhook: endpoint `POST /api/webhooks/resend`, subskrybuj `email.delivered`,
    `email.opened`, `email.clicked`, `email.bounced`, `email.complained`.
    Podpis (Svix) jest weryfikowany sekretem `RESEND_WEBHOOK_SECRET` — zdarzenia bez
    poprawnego podpisu są odrzucane.
-4. Każdy mail dostaje nagłówki `List-Unsubscribe` / `List-Unsubscribe-Post`
+5. Każdy mail dostaje nagłówki `List-Unsubscribe` / `List-Unsubscribe-Post`
    (`RESEND_UNSUBSCRIBE_URL`).
 
-Uwaga: open tracking bywa niedokładny (blokowanie obrazków, prefetch, przycinanie
-w Gmailu) — kliknięcia to pewniejszy sygnał; dashboard opisuje otwarcia jako orientacyjne.
+### Gdy otwarcia pokazują 0 (checklist diagnostyczny)
+
+Kod (webhook → `email_messages.opened_at`) działa; „zera" w otwarciach to prawie zawsze
+konfiguracja Resend. Sprawdź po kolei:
+
+1. **Subdomena trackingowa** jest dodana i ma status *Verified* (najczęstsza przyczyna).
+2. Przełącznik **Open Tracking** dla domeny jest **włączony**.
+3. Webhook subskrybuje zdarzenie **`email.opened`** i endpoint zwraca 2xx (nie 401 —
+   to znak, że `RESEND_WEBHOOK_SECRET` w aplikacji ≠ sekret z panelu Resend).
+4. Test na skrzynce **z włączonymi obrazkami** (patrz niżej — wiele klientów je blokuje).
+
+Uwaga: open tracking bywa niedokładny (blokowanie obrazków, prefetch, Apple Mail Privacy
+Protection, przycinanie w Gmailu) — kliknięcia to pewniejszy sygnał; dashboard opisuje
+otwarcia jako orientacyjne.
 
 ## RODO (wymóg twardy)
 
