@@ -714,3 +714,124 @@ a {
 	word-break: break-word;
 	font-family: ui-monospace, 'SF Mono', Menlo, monospace;
 }
+
+/* ============================================================
+   Responsywność / mobile — wysuwane menu (drawer)
+   ============================================================ */
+
+.topbar-left {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	min-width: 0;
+}
+
+/* Hamburger i przyciemnienie tła są aktywne wyłącznie na mobile. */
+.hamburger {
+	display: none;
+	align-items: center;
+	justify-content: center;
+	width: 40px;
+	height: 40px;
+	flex-shrink: 0;
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-md);
+	background: transparent;
+	color: var(--color-text);
+	font-size: 1.25rem;
+	line-height: 1;
+	cursor: pointer;
+	transition: var(--transition);
+}
+
+.hamburger:hover {
+	background: var(--color-surface-offset);
+}
+
+.sidebar-overlay {
+	display: none;
+	position: fixed;
+	inset: 0;
+	border: none;
+	padding: 0;
+	background: rgba(15, 23, 42, 0.5);
+	z-index: 50;
+	cursor: pointer;
+}
+
+@media (max-width: 900px) {
+	.sidebar {
+		position: fixed;
+		top: 0;
+		left: 0;
+		bottom: 0;
+		width: 260px;
+		max-width: 82vw;
+		z-index: 60;
+		overflow-y: auto;
+		transform: translateX(-100%);
+		transition: transform var(--transition);
+		box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
+	}
+
+	.sidebar.open {
+		transform: translateX(0);
+	}
+
+	.sidebar-overlay.show {
+		display: block;
+	}
+
+	.hamburger {
+		display: inline-flex;
+	}
+
+	.topbar {
+		height: 56px;
+		padding: 0 var(--space-4);
+	}
+
+	.topbar-user {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.content-area {
+		padding: var(--space-4);
+	}
+
+	.page-title {
+		font-size: 1.4rem;
+	}
+
+	.page-subtitle {
+		margin-bottom: var(--space-5);
+	}
+
+	/* Wygodniejsze cele dotykowe w menu. */
+	.nav-item {
+		padding: var(--space-3);
+		font-size: var(--text-base);
+	}
+
+	.tbl th,
+	.tbl td {
+		padding: var(--space-3) var(--space-4);
+	}
+}
+
+@media (max-width: 560px) {
+	/* Na bardzo wąskich ekranach e-mail zabiera cały pasek — chowamy etykietę. */
+	.topbar-user {
+		display: none;
+	}
+
+	.content-area {
+		padding: var(--space-3);
+	}
+
+	.page-title {
+		font-size: 1.25rem;
+	}
+}

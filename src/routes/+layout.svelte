@@ -51,6 +51,13 @@
 		return !allHrefs.some((h) => h !== href && h.length > href.length && matchesHref(h));
 	}
 
+	let menuOpen = $state(false);
+	// Zamknij wysuwane menu po każdej zmianie trasy (nawigacja na mobile).
+	$effect(() => {
+		page.url.pathname;
+		menuOpen = false;
+	});
+
 	let theme = $state('light');
 	$effect(() => {
 		theme = document.documentElement.dataset.theme ?? 'light';
@@ -64,7 +71,14 @@
 
 {#if data.userEmail}
 	<div class="app-container">
-		<aside class="sidebar">
+		<button
+			class="sidebar-overlay"
+			class:show={menuOpen}
+			type="button"
+			aria-label="Zamknij menu"
+			onclick={() => (menuOpen = false)}
+		></button>
+		<aside class="sidebar" class:open={menuOpen}>
 			<a class="brand" href="/" style="margin-bottom: var(--space-1)">Aura<span>HUB</span></a>
 			<div
 				class="faint mono"
@@ -77,7 +91,12 @@
 				<div class="nav-section">
 					<div class="nav-label">{section.label}</div>
 					{#each section.items as item (item.href)}
-						<a class="nav-item" class:active={isActive(item.href)} href={item.href}>
+						<a
+								class="nav-item"
+								class:active={isActive(item.href)}
+								href={item.href}
+								onclick={() => (menuOpen = false)}
+							>
 							<span aria-hidden="true">{item.icon}</span>
 							{item.title}
 						</a>
@@ -87,7 +106,16 @@
 		</aside>
 		<div class="main-content">
 			<header class="topbar">
-				<div>Zalogowano jako: <strong>{data.userEmail}</strong></div>
+				<div class="topbar-left">
+					<button
+						class="hamburger"
+						type="button"
+						aria-label="Menu"
+						aria-expanded={menuOpen}
+						onclick={() => (menuOpen = !menuOpen)}
+					>☰</button>
+					<div class="topbar-user">Zalogowano jako: <strong>{data.userEmail}</strong></div>
+				</div>
 				<div style="display: flex; gap: var(--space-2); align-items: center">
 					<button
 						class="btn btn-ghost"
