@@ -532,8 +532,13 @@ export async function materializeCampaign(
 		.not('company_id', 'is', null);
 	const already = new Set((existing ?? []).map((r) => r.company_id as number));
 
-	let queued = 0;
-	let skipped = 0;
+	// Budujemy wszystkie wiersze w pamięci, a potem wstawiamy HURTOWO (chunk).
+	// Round-trip do bazy per odbiorca przekracza limit ~50 subrequestów pojedynczego
+	// żądania Cloudflare (Free) — przy większych segmentach materializacja padała
+	// w połowie z błędem 500. Ta sama technika co w enqueueCategoryBlast.
+	const categoryId = campaign.category_id as string;
+	const queuedRows: Record<string, unknown>[] = [];
+	const skippedRows: Record<string, unknown>[] = [];
 	for (const company of companies) {
 		if (already.has(company.id)) continue;
 
@@ -548,20 +553,56 @@ export async function materializeCampaign(
 			reason = 'Brak zgody RODO na wysyłkę';
 		}
 
-		await createMessage(db, {
-			campaignId,
-			categoryId: campaign.category_id as string,
-			companyId: company.id,
-			toEmail: email || '(brak)',
+		const row = {
+			campaign_id: campaignId,
+			category_id: categoryId,
+			company_id: company.id,
+			to_email: email || '(brak)',
 			source: 'campaign',
-			variables: companyVariables(company),
-			rodoSnapshot: company.rodo ?? null,
+			variables_json: companyVariables(company),
+			rodo_snapshot: company.rodo ?? null,
 			status,
 			error: reason
-		});
-		if (status === 'queued') queued++;
-		else skipped++;
+		};
+		if (status === 'queued') queuedRows.push(row);
+		else skippedRows.push(row);
 	}
+
+	const CHUNK = 500;
+
+	// Pominięte: bez snapshotu załączników.
+	let skipped = 0;
+	for (let i = 0; i < skippedRows.length; i += CHUNK) {
+		const slice = skippedRows.slice(i, i + CHUNK);
+		const { error: insErr } = await db.from('email_messages').insert(slice);
+		if (insErr) throw new Error(`email_messages insert: ${insErr.message}`);
+		skipped += slice.length;
+	}
+
+	// W kolejce: wstaw wiadomości i dopnij snapshot domyślnych załączników kategorii.
+	let queued = 0;
+	const assetIds = await categoryAssetIds(db, categoryId);
+	for (let i = 0; i < queuedRows.length; i += CHUNK) {
+		const slice = queuedRows.slice(i, i + CHUNK);
+		const { data: inserted, error: insErr } = await db
+			.from('email_messages')
+			.insert(slice)
+			.select('id');
+		if (insErr) throw new Error(`email_messages insert: ${insErr.message}`);
+		queued += inserted?.length ?? 0;
+		if (assetIds.length > 0 && inserted && inserted.length > 0) {
+			const attachRows = inserted.flatMap((m) =>
+				assetIds.map((assetId) => ({ message_id: m.id as string, asset_id: assetId }))
+			);
+			for (let j = 0; j < attachRows.length; j += CHUNK) {
+				const { error: attErr } = await db
+					.from('email_attachments')
+					.insert(attachRows.slice(j, j + CHUNK));
+				if (attErr) throw new Error(`email_attachments insert: ${attErr.message}`);
+			}
+		}
+	}
+
 	return { queued, skipped };
 }
 
