@@ -7,10 +7,12 @@ export const BUCKET = 'email-assets';
 /** Resend domyślnie limituje do 2 req/s — odstęp między pojedynczymi wysyłkami. */
 export const SEND_DELAY_MS = 650;
 /**
- * Dzienny limit realnie wysłanych maili (darmowy plan Resend). Obowiązuje łącznie
- * dla kampanii i wysyłki „do wszystkich" wg kategorii; pierwszeństwo mają kampanie.
+ * Dzienny limit realnie wysłanych maili — zabezpieczenie przed masową wysyłką.
+ * Z komercyjnym planem Resend praktycznie nieograniczony; domyślnie bardzo wysoki,
+ * można ograniczyć zmienną środowiskową DAILY_SEND_LIMIT. Obowiązuje łącznie dla
+ * kampanii i wysyłki „do wszystkich" wg kategorii; pierwszeństwo mają kampanie.
  */
-export const DAILY_SEND_LIMIT = 100;
+export const DAILY_SEND_LIMIT = Number(env.DAILY_SEND_LIMIT ?? '') || 100000;
 const MAX_ATTEMPTS = 3;
 /** Base64 dokłada ~33%; cała wiadomość ma limit 40 MB. */
 const MAX_ATTACHMENT_TOTAL_BYTES = 28 * 1024 * 1024;
@@ -777,6 +779,14 @@ export async function processQueue(
 	origin: string,
 	limit = 20
 ): Promise<ProcessResult> {
+	// Rozmiar partii na jedno żądanie jest ograniczony limitem subrequestów Cloudflare:
+	// Pages Functions (Free) tną po ~50 zapytaniach, a jeden mail to ~8–10 (odczyty,
+	// pobranie załączników ze Storage, wywołanie Resend, zapis statusu, wpis do historii).
+	// Domyślnie ~4/uruchomienie jest bezpieczne na Free; na planie Paid (1000 subreq)
+	// podnieś przez env QUEUE_BATCH_SIZE (np. 20) dla szybszej wysyłki.
+	const batchCap = Number(env.QUEUE_BATCH_SIZE ?? '') || 4;
+	limit = Math.min(limit, batchCap);
+
 	// Uruchom zaplanowane kampanie, którym minął termin
 	const { data: due } = await db
 		.from('email_campaigns')
