@@ -89,6 +89,46 @@ export async function loadActiveCategories(db: SupabaseClient): Promise<EmailCat
 	return (data ?? []) as EmailCategory[];
 }
 
+/**
+ * Pobiera wskazane pliki z biblioteki i zamienia na załączniki Resend (Base64).
+ * Używane m.in. przy wysyłce testowej z Edytora e-mail.
+ */
+export async function loadAssetsAsAttachments(
+	db: SupabaseClient,
+	assetIds: string[]
+): Promise<{ attachments: ResendAttachment[]; error?: string }> {
+	if (assetIds.length === 0) return { attachments: [] };
+
+	const { data, error } = await db
+		.from('email_assets')
+		.select('storage_path, filename, size_bytes')
+		.in('id', assetIds);
+	if (error) return { attachments: [], error: `email_assets: ${error.message}` };
+
+	const rows = data ?? [];
+	const total = rows.reduce((sum, a) => sum + ((a.size_bytes as number | null) ?? 0), 0);
+	if (total > MAX_ATTACHMENT_TOTAL_BYTES) {
+		return {
+			attachments: [],
+			error: `Łączny rozmiar załączników ${(total / 1024 / 1024).toFixed(1)} MB przekracza bezpieczny limit ~28 MB`
+		};
+	}
+
+	const attachments: ResendAttachment[] = [];
+	for (const row of rows) {
+		const path = row.storage_path as string;
+		const { data: blob, error: dlError } = await db.storage.from(BUCKET).download(path);
+		if (dlError || !blob) {
+			return { attachments: [], error: `Nie udało się pobrać ${path}: ${dlError?.message ?? 'brak pliku'}` };
+		}
+		attachments.push({
+			filename: row.filename as string,
+			content: bytesToBase64(new Uint8Array(await blob.arrayBuffer()))
+		});
+	}
+	return { attachments };
+}
+
 /** Domyślne załączniki kategorii z biblioteki. */
 async function categoryAssetIds(db: SupabaseClient, categoryId: string): Promise<string[]> {
 	const { data, error } = await db
