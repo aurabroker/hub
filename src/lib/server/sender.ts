@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { env } from '$env/dynamic/private';
 import { EMAIL_RE, hasRodoConsent, normalizeInterest } from '$lib/categories';
+import { renderEmailHtml } from '$lib/email/render';
 import { sendResendEmail, type ResendAttachment } from './resend';
 
 export const BUCKET = 'email-assets';
@@ -268,14 +269,32 @@ export async function sendMessageNow(
 	);
 	if (attachError) return fail(attachError);
 
-	const result = await sendResendEmail({
-		from,
-		to: message.to_email as string,
-		subject,
-		templateId: category.resend_template_id,
-		variables: { ...((message.variables_json ?? {}) as Record<string, string>), ...fileVariables },
-		attachments
-	});
+	// Treść z Edytora HUB ma pierwszeństwo: gdy sekcja ma własny html_body,
+	// wysyłamy surowy HTML (personalizacja podstawiana po naszej stronie) zamiast
+	// szablonu Resend. Brak html_body → dawna ścieżka szablonu (bez zmian).
+	const htmlBody = typeof category.html_body === 'string' ? category.html_body.trim() : '';
+	const messageVars = (message.variables_json ?? {}) as Record<string, string>;
+
+	let result;
+	if (htmlBody) {
+		if (!subject) {
+			return fail('Sekcja ma treść HTML, ale brak tematu — ustaw temat sekcji w Edytorze e-mail');
+		}
+		const html = renderEmailHtml(htmlBody, messageVars, {
+			unsubscribeUrl: env.RESEND_UNSUBSCRIBE_URL,
+			plikiHtml: fileVariables.pliki_html
+		});
+		result = await sendResendEmail({ from, to: message.to_email as string, subject, html, attachments });
+	} else {
+		result = await sendResendEmail({
+			from,
+			to: message.to_email as string,
+			subject,
+			templateId: category.resend_template_id,
+			variables: { ...messageVars, ...fileVariables },
+			attachments
+		});
+	}
 	if (!result.ok) return fail(result.error ?? 'Nieznany błąd Resend');
 
 	await db
