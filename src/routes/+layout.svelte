@@ -26,6 +26,7 @@
 			label: 'Wysyłka',
 			items: [
 				{ href: '/send', title: 'WYŚLIJ EMAIL', icon: '✉' },
+				{ href: '/email-editor', title: 'EDYTOR E-MAIL', icon: '✎' },
 				{ href: '/campaigns', title: 'Kampanie', icon: '⇶' },
 				{ href: '/messages', title: 'Historia wysyłek', icon: '≣' }
 			]
