@@ -60,5 +60,54 @@ export const actions: Actions = {
 			.eq('id', id);
 		if (error) return fail(500, { error: error.message });
 		return { success: 'Zapisano kategorię' };
+	},
+
+	/**
+	 * Włącza/wyłącza automatyczną wysyłkę sekcji. Przy włączaniu ustawiamy datę
+	 * odcięcia na teraz — automat obejmie WYŁĄCZNIE zapisy późniejsze, więc
+	 * istniejąca baza nie dostanie maila.
+	 */
+	autoSend: async ({ request }) => {
+		const form = await request.formData();
+		const id = String(form.get('id') ?? '');
+		const enable = String(form.get('enable') ?? '') === '1';
+		if (!id) return fail(400, { error: 'Brak identyfikatora kategorii' });
+
+		const db = adminClient();
+		const { data: cat } = await db
+			.from('email_categories')
+			.select('name, resend_template_id, html_body, subject')
+			.eq('id', id)
+			.maybeSingle();
+		if (!cat) return fail(404, { error: 'Nie znaleziono kategorii' });
+
+		if (enable) {
+			const hasHtml = Boolean((cat.html_body as string | null)?.trim());
+			const hasTemplate = Boolean(cat.resend_template_id);
+			if (!hasHtml && !hasTemplate) {
+				return fail(400, {
+					error: `„${cat.name}” nie ma treści ani szablonu Resend — automat nie miałby czego wysłać`
+				});
+			}
+			if (hasHtml && !(cat.subject as string | null)?.trim()) {
+				return fail(400, { error: `„${cat.name}”: przy treści HTML wymagany jest temat maila` });
+			}
+		}
+
+		const { error } = await db
+			.from('email_categories')
+			.update(
+				enable
+					? { auto_send: true, auto_send_since: new Date().toISOString() }
+					: { auto_send: false }
+			)
+			.eq('id', id);
+		if (error) return fail(500, { error: error.message });
+
+		return {
+			success: enable
+				? `Automat włączony dla „${cat.name}” — obejmie tylko zapisy od teraz`
+				: `Automat wyłączony dla „${cat.name}”`
+		};
 	}
 };

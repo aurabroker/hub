@@ -46,6 +46,7 @@
 		<select class="form-select" id="source" name="source">
 			<option value="">wszystkie</option>
 			<option value="quick_send" selected={data.filters.source === 'quick_send'}>szybka wysyłka</option>
+			<option value="auto" selected={data.filters.source === 'auto'}>automat</option>
 			<option value="campaign" selected={data.filters.source === 'campaign'}>kampania</option>
 		</select>
 	</div>
@@ -93,6 +94,8 @@
 						<td>
 							{#if m.source === 'quick_send'}
 								<span class="badge badge-primary">1-do-1</span>
+							{:else if m.source === 'auto'}
+								<span class="badge badge-success">automat</span>
 							{:else if m.email_campaigns}
 								<a href="/campaigns/{m.email_campaigns.id}">{m.email_campaigns.name}</a>
 							{:else}

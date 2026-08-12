@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { fmtDateTime } from '$lib/ud/format';
 	import type { ActionData, PageServerData } from './$types';
 
 	let { data, form }: { data: PageServerData; form: ActionData } = $props();
@@ -151,4 +152,36 @@
 			<button class="btn btn-primary" type="submit">Zapisz</button>
 		</div>
 	</form>
+
+	<!-- Automat: osobny formularz (formularzy nie można zagnieżdżać) -->
+	<div class="card" style="margin-top: calc(-1 * var(--space-4)); border-top: none">
+		<div style="display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); flex-wrap: wrap">
+			<div>
+				<strong style="font-size: var(--text-sm)">Automatyczna wysyłka</strong>
+				{#if category.auto_send}
+					<span class="badge badge-success" style="margin-left: 6px">WŁĄCZONA</span>
+				{:else}
+					<span class="badge badge-muted" style="margin-left: 6px">wyłączona</span>
+				{/if}
+				<div class="faint" style="margin-top: 4px">
+					{#if category.auto_send}
+						Nowe zapisy w tej sekcji dostają maila automatycznie (cron).
+						{#if category.auto_send_since}
+							Obejmuje zapisy od {fmtDateTime(category.auto_send_since)} — starsza baza jest pominięta.
+						{/if}
+					{:else}
+						Po włączeniu automat obejmie <strong>tylko zapisy od tego momentu</strong> —
+						istniejąca baza nie dostanie maila.
+					{/if}
+				</div>
+			</div>
+			<form method="POST" action="?/autoSend" use:enhance>
+				<input type="hidden" name="id" value={category.id} />
+				<input type="hidden" name="enable" value={category.auto_send ? '0' : '1'} />
+				<button class={category.auto_send ? 'btn btn-danger' : 'btn btn-primary'} type="submit">
+					{category.auto_send ? 'Wyłącz automat' : 'Włącz automat'}
+				</button>
+			</form>
+		</div>
+	</div>
 {/each}

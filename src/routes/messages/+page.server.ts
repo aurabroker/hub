@@ -36,7 +36,8 @@ export const load: PageServerLoad = async ({ url }) => {
 		.order('created_at', { ascending: false })
 		.limit(200);
 	if (status && STATUSES.includes(status)) query = query.eq('status', status);
-	if (source === 'campaign' || source === 'quick_send') query = query.eq('source', source);
+	if (source === 'campaign' || source === 'quick_send' || source === 'auto')
+		query = query.eq('source', source);
 	if (categoryId) query = query.eq('category_id', categoryId);
 	if (search) query = query.ilike('to_email', `%${search}%`);
 

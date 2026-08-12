@@ -819,6 +819,131 @@ export async function enqueueCategoryBlast(
 	return result;
 }
 
+/** Dobowy limit maili wysyłanych automatem (osobny od kampanii/ręcznych). */
+export const AUTO_SEND_DAILY_LIMIT = Number(env.AUTO_SEND_DAILY_LIMIT ?? '') || 100;
+
+export interface AutoSendResult {
+	enqueued: number;
+	perCategory: Record<string, number>;
+	/** Wyczerpany dobowy limit automatu. */
+	limitReached?: boolean;
+}
+
+/**
+ * Automatyczna wysyłka: kolejkuje NOWE zapisy dla sekcji z auto_send = true.
+ * Bierze wyłącznie kontakty zapisane po `auto_send_since` (data odcięcia), z
+ * poprawnym e-mailem i zgodą RODO, które nie były jeszcze obsłużone w tej sekcji.
+ * Respektuje dobowy limit automatu. Wstawianie hurtowe (limit subrequestów CF).
+ */
+export async function enqueueAutoSend(db: SupabaseClient): Promise<AutoSendResult> {
+	const result: AutoSendResult = { enqueued: 0, perCategory: {} };
+
+	const { data: cats, error: catErr } = await db
+		.from('email_categories')
+		.select('id, code, auto_send_since')
+		.eq('active', true)
+		.eq('auto_send', true);
+	if (catErr) throw new Error(`email_categories: ${catErr.message}`);
+	if (!cats || cats.length === 0) return result;
+
+	// Dobowy limit automatu — liczony na wiadomościach zakolejkowanych dziś przez automat.
+	const { count: autoToday } = await db
+		.from('email_messages')
+		.select('id', { count: 'exact', head: true })
+		.eq('source', 'auto')
+		.gte('created_at', startOfTodayIso());
+	let budget = Math.max(0, AUTO_SEND_DAILY_LIMIT - (autoToday ?? 0));
+	if (budget <= 0) return { ...result, limitReached: true };
+
+	// Kontakty pobieramy raz dla wszystkich sekcji (oszczędność subrequestów).
+	const { data: rows, error: coErr } = await db
+		.from('crm_companies')
+		.select(`${COMPANY_COLUMNS}, created_at, data_zgloszenia`)
+		.limit(20000);
+	if (coErr) throw new Error(`crm_companies: ${coErr.message}`);
+	const companies = (rows ?? []) as (CrmCompany & {
+		created_at: string | null;
+		data_zgloszenia: string | null;
+	})[];
+
+	for (const cat of cats) {
+		if (budget <= 0) {
+			result.limitReached = true;
+			break;
+		}
+		const categoryId = cat.id as string;
+		const code = cat.code as string;
+		// Brak daty odcięcia = nie ryzykujemy wysyłki do całej bazy.
+		const since = cat.auto_send_since as string | null;
+		if (!since) continue;
+		const sinceMs = Date.parse(since);
+
+		const { data: existing, error: exErr } = await db
+			.from('email_messages')
+			.select('company_id')
+			.eq('category_id', categoryId)
+			.not('company_id', 'is', null)
+			.in('status', ['queued', 'sending', 'sent']);
+		if (exErr) throw new Error(`email_messages: ${exErr.message}`);
+		const handled = new Set((existing ?? []).map((r) => r.company_id as number));
+
+		const toInsert: Record<string, unknown>[] = [];
+		for (const c of companies) {
+			if (budget - toInsert.length <= 0) break;
+			if (normalizeInterest(c.ubezpieczenie) !== code) continue;
+
+			const signedUp = Date.parse(c.data_zgloszenia ?? c.created_at ?? '');
+			if (!Number.isFinite(signedUp) || signedUp <= sinceMs) continue;
+
+			const email = (c.email ?? '').trim();
+			if (!EMAIL_RE.test(email)) continue;
+			if (!hasRodoConsent(c.rodo)) continue;
+			if (handled.has(c.id)) continue;
+
+			toInsert.push({
+				campaign_id: null,
+				category_id: categoryId,
+				company_id: c.id,
+				to_email: email,
+				source: 'auto',
+				variables_json: companyVariables(c),
+				rodo_snapshot: c.rodo ?? null,
+				status: 'queued'
+			});
+		}
+		if (toInsert.length === 0) continue;
+
+		const assetIds = await categoryAssetIds(db, categoryId);
+		const CHUNK = 500;
+		let added = 0;
+		for (let i = 0; i < toInsert.length; i += CHUNK) {
+			const slice = toInsert.slice(i, i + CHUNK);
+			const { data: inserted, error: insErr } = await db
+				.from('email_messages')
+				.insert(slice)
+				.select('id');
+			if (insErr) throw new Error(`email_messages insert: ${insErr.message}`);
+			added += inserted?.length ?? 0;
+			if (assetIds.length > 0 && inserted && inserted.length > 0) {
+				const attachRows = inserted.flatMap((m) =>
+					assetIds.map((assetId) => ({ message_id: m.id as string, asset_id: assetId }))
+				);
+				for (let j = 0; j < attachRows.length; j += CHUNK) {
+					const { error: attErr } = await db
+						.from('email_attachments')
+						.insert(attachRows.slice(j, j + CHUNK));
+					if (attErr) throw new Error(`email_attachments insert: ${attErr.message}`);
+				}
+			}
+		}
+		result.perCategory[code] = added;
+		result.enqueued += added;
+		budget -= added;
+	}
+
+	return result;
+}
+
 export interface ProcessResult {
 	processed: number;
 	sent: number;
