@@ -175,9 +175,28 @@
 					{/if}
 				</div>
 			</div>
-			<form method="POST" action="?/autoSend" use:enhance>
+			<form
+				method="POST"
+				action="?/autoSend"
+				use:enhance
+				style="display: flex; gap: var(--space-2); align-items: flex-end; flex-wrap: wrap"
+				onsubmit={(e) => {
+					// ISO liczone lokalnie w przeglądarce — serwer (UTC) nie przesunie godziny.
+					const f = e.currentTarget as HTMLFormElement;
+					const d = (f.elements.namedItem('startDate') as HTMLInputElement | null)?.value;
+					const iso = f.elements.namedItem('sinceIso') as HTMLInputElement;
+					if (iso) iso.value = d ? new Date(d + 'T00:00:00').toISOString() : '';
+				}}
+			>
 				<input type="hidden" name="id" value={category.id} />
 				<input type="hidden" name="enable" value={category.auto_send ? '0' : '1'} />
+				<input type="hidden" name="sinceIso" value="" />
+				{#if !category.auto_send}
+					<div class="form-field" style="margin: 0">
+						<label class="form-label" for="start-{category.id}">Start (puste = od teraz)</label>
+						<input class="form-input" id="start-{category.id}" name="startDate" type="date" />
+					</div>
+				{/if}
 				<button class={category.auto_send ? 'btn btn-danger' : 'btn btn-primary'} type="submit">
 					{category.auto_send ? 'Wyłącz automat' : 'Włącz automat'}
 				</button>

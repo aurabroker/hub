@@ -94,19 +94,28 @@ export const actions: Actions = {
 			}
 		}
 
+		// Data startu z formularza (ISO liczone w przeglądarce — bez pułapki stref czasowych).
+		// Brak = start od teraz.
+		const sinceRaw = String(form.get('sinceIso') ?? '').trim();
+		let since = new Date().toISOString();
+		if (sinceRaw) {
+			const parsed = Date.parse(sinceRaw);
+			if (!Number.isFinite(parsed)) return fail(400, { error: 'Nieprawidłowa data startu' });
+			since = new Date(parsed).toISOString();
+		}
+
 		const { error } = await db
 			.from('email_categories')
-			.update(
-				enable
-					? { auto_send: true, auto_send_since: new Date().toISOString() }
-					: { auto_send: false }
-			)
+			.update(enable ? { auto_send: true, auto_send_since: since } : { auto_send: false })
 			.eq('id', id);
 		if (error) return fail(500, { error: error.message });
 
+		const startsInFuture = Date.parse(since) > Date.now();
 		return {
 			success: enable
-				? `Automat włączony dla „${cat.name}” — obejmie tylko zapisy od teraz`
+				? `Automat włączony dla „${cat.name}” — ${
+						startsInFuture ? 'ruszy' : 'obejmuje zapisy od'
+					} ${new Date(since).toLocaleString('pl-PL')}`
 				: `Automat wyłączony dla „${cat.name}”`
 		};
 	}
