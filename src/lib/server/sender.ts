@@ -971,6 +971,23 @@ export async function processQueue(
 	const batchCap = Number(env.QUEUE_BATCH_SIZE ?? '') || 4;
 	limit = Math.min(limit, batchCap);
 
+	// Automat działa też na STARYM workerze (który woła tylko ten endpoint):
+	// kolejkujemy nowe zapisy wyłącznie gdy kolejka jest pusta — wtedy wysyłka nie
+	// zużyje budżetu subrequestów Cloudflare i oba etapy się mieszczą. Gdy w kolejce
+	// coś czeka, pomijamy — automat dokolejkuje przy kolejnym przebiegu (co 2 min).
+	// Błąd automatu nie może przewrócić wysyłki, stąd try/catch.
+	const { count: pendingCount } = await db
+		.from('email_messages')
+		.select('id', { count: 'exact', head: true })
+		.eq('status', 'queued');
+	if ((pendingCount ?? 0) === 0) {
+		try {
+			await enqueueAutoSend(db);
+		} catch (e) {
+			console.error(`auto-send: ${e instanceof Error ? e.message : String(e)}`);
+		}
+	}
+
 	// Uruchom zaplanowane kampanie, którym minął termin
 	const { data: due } = await db
 		.from('email_campaigns')
