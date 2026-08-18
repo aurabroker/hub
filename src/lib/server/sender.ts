@@ -963,29 +963,20 @@ export async function processQueue(
 	origin: string,
 	limit = 20
 ): Promise<ProcessResult> {
-	// Rozmiar partii na jedno żądanie jest ograniczony limitem subrequestów Cloudflare:
-	// Pages Functions (Free) tną po ~50 zapytaniach, a jeden mail to ~8–10 (odczyty,
-	// pobranie załączników ze Storage, wywołanie Resend, zapis statusu, wpis do historii).
-	// Domyślnie ~4/uruchomienie jest bezpieczne na Free; na planie Paid (1000 subreq)
-	// podnieś przez env QUEUE_BATCH_SIZE (np. 20) dla szybszej wysyłki.
-	const batchCap = Number(env.QUEUE_BATCH_SIZE ?? '') || 4;
+	// Rozmiar partii ogranicza limit subrequestów Cloudflare (jeden mail to ~8–10:
+	// odczyty, pobranie załączników ze Storage, wywołanie Resend, zapis statusu, wpis
+	// do historii). Plan Workers Paid daje 1000 subrequestów, więc 20/uruchomienie jest
+	// bezpieczne. Na planie Free (50) ustaw env QUEUE_BATCH_SIZE=4.
+	const batchCap = Number(env.QUEUE_BATCH_SIZE ?? '') || 20;
 	limit = Math.min(limit, batchCap);
 
-	// Automat działa też na STARYM workerze (który woła tylko ten endpoint):
-	// kolejkujemy nowe zapisy wyłącznie gdy kolejka jest pusta — wtedy wysyłka nie
-	// zużyje budżetu subrequestów Cloudflare i oba etapy się mieszczą. Gdy w kolejce
-	// coś czeka, pomijamy — automat dokolejkuje przy kolejnym przebiegu (co 2 min).
-	// Błąd automatu nie może przewrócić wysyłki, stąd try/catch.
-	const { count: pendingCount } = await db
-		.from('email_messages')
-		.select('id', { count: 'exact', head: true })
-		.eq('status', 'queued');
-	if ((pendingCount ?? 0) === 0) {
-		try {
-			await enqueueAutoSend(db);
-		} catch (e) {
-			console.error(`auto-send: ${e instanceof Error ? e.message : String(e)}`);
-		}
+	// Automat: kolejkujemy nowe zapisy przy każdym przebiegu, więc nowy zapis dostaje
+	// maila w ciągu ~2 min niezależnie od stanu kolejki (budżet subrequestów na planie
+	// Paid to pozwala). Błąd automatu nie może przewrócić wysyłki, stąd try/catch.
+	try {
+		await enqueueAutoSend(db);
+	} catch (e) {
+		console.error(`auto-send: ${e instanceof Error ? e.message : String(e)}`);
 	}
 
 	// Uruchom zaplanowane kampanie, którym minął termin
