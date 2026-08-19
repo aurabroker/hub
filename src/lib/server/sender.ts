@@ -15,6 +15,8 @@ export const SEND_DELAY_MS = 650;
  */
 export const DAILY_SEND_LIMIT = Number(env.DAILY_SEND_LIMIT ?? '') || 100000;
 const MAX_ATTEMPTS = 3;
+/** Po tylu minutach wiadomość w stanie 'sending' uznajemy za zawieszoną i wracamy z nią do kolejki. */
+const STALE_SENDING_MINUTES = 15;
 /** Base64 dokłada ~33%; cała wiadomość ma limit 40 MB. */
 const MAX_ATTACHMENT_TOTAL_BYTES = 28 * 1024 * 1024;
 
@@ -234,7 +236,7 @@ async function prepareFiles(
 async function claimMessage(db: SupabaseClient, messageId: string, attempts: number) {
 	const { data, error } = await db
 		.from('email_messages')
-		.update({ status: 'sending', attempts: attempts + 1 })
+		.update({ status: 'sending', attempts: attempts + 1, claimed_at: new Date().toISOString() })
 		.eq('id', messageId)
 		.eq('status', 'queued')
 		.select('*')
@@ -969,6 +971,23 @@ export async function processQueue(
 	// bezpieczne. Na planie Free (50) ustaw env QUEUE_BATCH_SIZE=4.
 	const batchCap = Number(env.QUEUE_BATCH_SIZE ?? '') || 20;
 	limit = Math.min(limit, batchCap);
+
+	// Odzyskiwanie zawieszonych wiadomości: jeśli funkcja padnie po przejęciu maila
+	// (status 'sending'), nikt go już nie podniesie — claimMessage bierze tylko 'queued'.
+	// Takie wiadomości wracają do kolejki po STALE_SENDING_MINUTES. Licznik prób
+	// zostaje nietknięty, więc MAX_ATTEMPTS nadal chroni przed pętlą wysyłki.
+	const staleBefore = new Date(Date.now() - STALE_SENDING_MINUTES * 60_000).toISOString();
+	const { data: revived, error: reviveErr } = await db
+		.from('email_messages')
+		.update({ status: 'queued' })
+		.eq('status', 'sending')
+		.or(`claimed_at.is.null,claimed_at.lt.${staleBefore}`)
+		.select('id');
+	if (reviveErr) {
+		console.error(`odzyskiwanie zawieszonych: ${reviveErr.message}`);
+	} else if (revived && revived.length > 0) {
+		console.warn(`odzyskano ${revived.length} zawieszonych wiadomości z 'sending'`);
+	}
 
 	// Automat: kolejkujemy nowe zapisy przy każdym przebiegu, więc nowy zapis dostaje
 	// maila w ciągu ~2 min niezależnie od stanu kolejki (budżet subrequestów na planie
