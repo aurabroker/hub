@@ -81,3 +81,30 @@ export async function sendResendEmail(args: ResendSendArgs): Promise<ResendSendR
 	const data = (await res.json()) as { id: string };
 	return { ok: true, id: data.id };
 }
+
+/**
+ * Pobiera stan pojedynczego maila (GET /emails/:id).
+ * Resend zwraca wyłącznie `last_event` — ostatnie zdarzenie, bez znaczników czasu
+ * poszczególnych zdarzeń. Służy do uzupełniania statystyk sprzed subskrypcji webhooka.
+ */
+export async function getResendEmail(
+	id: string
+): Promise<{ ok: boolean; lastEvent?: string; error?: string; rateLimited?: boolean }> {
+	if (!env.RESEND_API_KEY) return { ok: false, error: 'Brak RESEND_API_KEY w środowisku' };
+
+	let res: Response;
+	try {
+		res = await fetch(`https://api.resend.com/emails/${encodeURIComponent(id)}`, {
+			headers: { Authorization: `Bearer ${env.RESEND_API_KEY}` }
+		});
+	} catch (e) {
+		return { ok: false, error: `Błąd sieci: ${e instanceof Error ? e.message : String(e)}` };
+	}
+
+	if (res.status === 429) return { ok: false, rateLimited: true, error: 'Limit zapytań Resend' };
+	if (!res.ok) return { ok: false, error: `Resend HTTP ${res.status}` };
+
+	const data = (await res.json()) as { last_event?: string };
+	return { ok: true, lastEvent: data.last_event };
+}
+

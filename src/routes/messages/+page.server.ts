@@ -1,5 +1,7 @@
+import { fail } from '@sveltejs/kit';
 import { adminClient } from '$lib/server/supabase';
-import type { PageServerLoad } from './$types';
+import { backfillPending, backfillStats } from '$lib/server/stats';
+import type { Actions, PageServerLoad } from './$types';
 
 const STATUSES = ['queued', 'sending', 'sent', 'failed', 'bounced', 'skipped'];
 
@@ -17,6 +19,7 @@ interface MessageRow {
 	delivered_at: string | null;
 	opened_at: string | null;
 	clicked_at: string | null;
+	stats_backfilled_at: string | null;
 	email_categories: { code: string; name: string } | null;
 	email_campaigns: { id: string; name: string } | null;
 }
@@ -31,7 +34,7 @@ export const load: PageServerLoad = async ({ url }) => {
 	let query = db
 		.from('email_messages')
 		.select(
-			'id, created_at, to_email, company_id, source, status, error, attempts, resend_id, sent_at, delivered_at, opened_at, clicked_at, email_categories ( code, name ), email_campaigns ( id, name )'
+			'id, created_at, to_email, company_id, source, status, error, attempts, resend_id, sent_at, delivered_at, opened_at, clicked_at, stats_backfilled_at, email_categories ( code, name ), email_campaigns ( id, name )'
 		)
 		.order('created_at', { ascending: false })
 		.limit(200);
@@ -41,11 +44,13 @@ export const load: PageServerLoad = async ({ url }) => {
 	if (categoryId) query = query.eq('category_id', categoryId);
 	if (search) query = query.ilike('to_email', `%${search}%`);
 
-	const [{ data: messages }, { data: categories }, { data: statusRows }] = await Promise.all([
-		query,
-		db.from('email_categories').select('id, code, name').order('sort_order'),
-		db.from('email_messages').select('status')
-	]);
+	const [{ data: messages }, { data: categories }, { data: statusRows }, pendingBackfill] =
+		await Promise.all([
+			query,
+			db.from('email_categories').select('id, code, name').order('sort_order'),
+			db.from('email_messages').select('status'),
+			backfillPending(db)
+		]);
 
 	const counts: Record<string, number> = {};
 	for (const row of statusRows ?? []) {
@@ -57,6 +62,19 @@ export const load: PageServerLoad = async ({ url }) => {
 		messages: (messages ?? []) as unknown as MessageRow[],
 		categories: categories ?? [],
 		counts,
+		pendingBackfill,
 		filters: { status, source, category: categoryId, q: search ?? '' }
 	};
+};
+
+export const actions: Actions = {
+	/** Uzupełnia statystyki z API Resend dla maili sprzed subskrypcji email.opened. */
+	backfill: async () => {
+		try {
+			const result = await backfillStats(adminClient());
+			return { backfill: result };
+		} catch (e) {
+			return fail(500, { error: e instanceof Error ? e.message : String(e) });
+		}
+	}
 };

@@ -1,7 +1,9 @@
 <script lang="ts">
-	import type { PageServerData } from './$types';
+	import { enhance } from '$app/forms';
+	import type { ActionData, PageServerData } from './$types';
 
-	let { data }: { data: PageServerData } = $props();
+	let { data, form }: { data: PageServerData; form: ActionData } = $props();
+	let busy = $state(false);
 
 	const statusBadge: Record<string, string> = {
 		queued: 'badge-warning',
@@ -26,6 +28,36 @@
 	Log wszystkich maili ({total} łącznie): szybka wysyłka i kampanie. Otwarcia/kliknięcia
 	uzupełniają się po zdarzeniach z webhooka Resend.
 </p>
+
+{#if form?.backfill}
+	{@const b = form.backfill}
+	<div class="alert alert-success">
+		Uzupełniono z Resend: sprawdzono {b.sprawdzono}, otwarcia +{b.otwarcia}, kliknięcia +{b.klikniecia}, odbicia +{b.odbicia}.
+		{#if b.pozostalo > 0}Zostało {b.pozostalo} — kliknij ponownie.{:else}Wszystkie maile sprawdzone.{/if}
+		{#if b.rateLimited}<br />Resend przyciął tempo — odczekaj chwilę i kliknij ponownie.{/if}
+		{#if b.bledy > 0}<br />Błędy: {b.bledy}.{/if}
+	</div>
+{:else if form?.error}
+	<div class="alert alert-error">{form.error}</div>
+{/if}
+
+{#if data.pendingBackfill > 0}
+	<div class="card" style="display: flex; gap: var(--space-3); align-items: center; justify-content: space-between; flex-wrap: wrap">
+		<div>
+			<strong style="font-size: var(--text-sm)">Uzupełnij statystyki z Resend</strong>
+			<div class="faint" style="margin-top: 4px">
+				{data.pendingBackfill} maili wysłano zanim webhook subskrybował otwarcia. Można pobrać ich
+				status z API Resend. Uwaga: API podaje tylko ostatnie zdarzenie, więc data otwarcia będzie
+				<strong>przybliżona</strong> (czas dostarczenia).
+			</div>
+		</div>
+		<form method="POST" action="?/backfill" use:enhance={() => { busy = true; return async ({ update }) => { busy = false; await update({ reset: false }); }; }}>
+			<button class="btn btn-primary" type="submit" disabled={busy}>
+				{busy ? 'Pobieranie…' : 'Uzupełnij (partia 25)'}
+			</button>
+		</form>
+	</div>
+{/if}
 
 <form class="card" method="GET" style="display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: flex-end">
 	<div class="form-field" style="margin: 0; min-width: 200px">
@@ -104,7 +136,13 @@
 						</td>
 						<td><span class="badge {statusBadge[m.status] ?? 'badge-muted'}">{m.status}</span></td>
 						<td class="muted" style="white-space: nowrap">{fmt(m.sent_at)}</td>
-						<td class="muted" style="white-space: nowrap">{fmt(m.opened_at)}</td>
+						<td class="muted" style="white-space: nowrap">
+							{#if m.opened_at && m.stats_backfilled_at}
+								<span title="Data przybliżona — uzupełniona z API Resend, które nie podaje czasu zdarzenia">≈ {fmt(m.opened_at)}</span>
+							{:else}
+								{fmt(m.opened_at)}
+							{/if}
+						</td>
 						<td class="muted" style="white-space: nowrap">{fmt(m.clicked_at)}</td>
 						<td style="max-width: 260px">
 							{#if m.error}
