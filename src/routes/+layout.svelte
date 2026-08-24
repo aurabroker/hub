@@ -28,6 +28,7 @@
 				{ href: '/send', title: 'WYŚLIJ EMAIL', icon: '✉' },
 				{ href: '/email-editor', title: 'EDYTOR E-MAIL', icon: '✎' },
 				{ href: '/campaigns', title: 'Kampanie', icon: '⇶' },
+				{ href: '/sms-export', title: 'EKSPORT SMS (CSV)', icon: '⇩' },
 				{ href: '/messages', title: 'Historia wysyłek', icon: '≣' }
 			]
 		},
