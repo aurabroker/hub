@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { env } from '$env/dynamic/private';
 import { EMAIL_RE, hasRodoConsent, normalizeInterest } from '$lib/categories';
 import { renderEmailHtml } from '$lib/email/render';
+import { decorateLinksWithUtm, slugifyUtm } from '$lib/utm';
 import { sendResendEmail, type ResendAttachment } from './resend';
 
 export const BUCKET = 'email-assets';
@@ -289,11 +290,12 @@ export async function sendMessageNow(
 		.maybeSingle();
 	if (!category) return fail('Wiadomość nie ma przypisanej kategorii');
 
-	let campaign: { subject: string | null; from_email: string | null } | null = null;
+	let campaign: { name: string | null; subject: string | null; from_email: string | null } | null =
+		null;
 	if (message.campaign_id) {
 		const { data } = await db
 			.from('email_campaigns')
-			.select('subject, from_email')
+			.select('name, subject, from_email')
 			.eq('id', message.campaign_id)
 			.maybeSingle();
 		campaign = data;
@@ -322,7 +324,17 @@ export async function sendMessageNow(
 		if (!subject) {
 			return fail('Sekcja ma treść HTML, ale brak tematu — ustaw temat sekcji w Edytorze e-mail');
 		}
-		const html = renderEmailHtml(htmlBody, messageVars, {
+		// Auto-UTM: linki w treści dostają oznaczenie kanału, żeby ruch z maili
+		// przestał wpadać w raportach do worka „direct". Kampania = kod sekcji,
+		// wariant = nazwa kampanii masowej. Linki, które już mają utm_source
+		// (np. wklejone z biblioteki UTM), zostają nietknięte.
+		const decorated = decorateLinksWithUtm(htmlBody, {
+			source: 'email',
+			medium: 'email',
+			campaign: category.code as string,
+			content: campaign?.name ? slugifyUtm(campaign.name) : 'szybka-wysylka'
+		});
+		const html = renderEmailHtml(decorated, messageVars, {
 			unsubscribeUrl: env.RESEND_UNSUBSCRIBE_URL,
 			plikiHtml: fileVariables.pliki_html
 		});
