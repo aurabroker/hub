@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { env } from '$env/dynamic/private';
 import { EMAIL_RE, hasRodoConsent, normalizeInterest } from '$lib/categories';
 import { renderEmailHtml } from '$lib/email/render';
+import { fetchAllRows } from '$lib/server/supabase';
 import { decorateLinksWithUtm, slugifyUtm } from '$lib/utm';
 import { sendResendEmail, type ResendAttachment } from './resend';
 
@@ -485,16 +486,20 @@ export async function segmentCompanies(
 	db: SupabaseClient,
 	filters: SegmentFilters
 ): Promise<CrmCompany[]> {
-	let query = db.from('crm_companies').select(COMPANY_COLUMNS);
-	if (filters.statusy && filters.statusy.length > 0) query = query.in('status', filters.statusy);
-	if (filters.miasto) query = query.ilike('city', `%${filters.miasto}%`);
-	if (filters.tag) query = query.ilike('tag', `%${filters.tag}%`);
-	if (filters.lead_source) query = query.ilike('lead_source', `%${filters.lead_source}%`);
+	// Builder zapytania budujemy od nowa dla KAŻDEJ strony. Ponowne użycie
+	// jednego obiektu doklejałoby order/range przy każdym przebiegu i psuło URL.
+	const buildQuery = (from: number, to: number) => {
+		let query = db.from('crm_companies').select(COMPANY_COLUMNS);
+		if (filters.statusy && filters.statusy.length > 0) query = query.in('status', filters.statusy);
+		if (filters.miasto) query = query.ilike('city', `%${filters.miasto}%`);
+		if (filters.tag) query = query.ilike('tag', `%${filters.tag}%`);
+		if (filters.lead_source) query = query.ilike('lead_source', `%${filters.lead_source}%`);
+		return query.order('id').range(from, to);
+	};
 
-	const { data, error } = await query.limit(10000);
-	if (error) throw new Error(`crm_companies: ${error.message}`);
-
-	let companies = (data ?? []) as CrmCompany[];
+	// Segment potrafi objąć całą bazę, a PostgREST tnie odpowiedź do db_max_rows
+	// bez błędu — bez stronicowania kampania po cichu omijałaby część kontaktów.
+	let companies = await fetchAllRows<CrmCompany>(buildQuery, 'crm_companies');
 	if (filters.kategorie && filters.kategorie.length > 0) {
 		const wanted = new Set(filters.kategorie);
 		companies = companies.filter((c) => wanted.has(normalizeInterest(c.ubezpieczenie)));
@@ -519,12 +524,23 @@ async function applyAudienceMode(
 ): Promise<{ companies: CrmCompany[]; excluded: number }> {
 	if (mode === 'all' || !categoryId) return { companies, excluded: 0 };
 
-	const { data, error } = await db
-		.from('email_messages')
-		.select('company_id, status, opened_at')
-		.eq('category_id', categoryId)
-		.not('company_id', 'is', null);
-	if (error) throw new Error(`email_messages history: ${error.message}`);
+	// Historia decyduje o wykluczeniach — przycięta do db_max_rows dawałaby
+	// powtórne maile do osób, które już je dostały. Czytamy stronami.
+	const data = await fetchAllRows<{
+		company_id: number;
+		status: string;
+		opened_at: string | null;
+	}>(
+		(from, to) =>
+			db
+				.from('email_messages')
+				.select('company_id, status, opened_at')
+				.eq('category_id', categoryId)
+				.not('company_id', 'is', null)
+				.order('id')
+				.range(from, to),
+		'email_messages history'
+	);
 
 	const sentTo = new Set<number>();
 	const openedBy = new Set<number>();
@@ -600,12 +616,20 @@ export async function materializeCampaign(
 		campaign.category_id as string | null
 	);
 
-	const { data: existing } = await db
-		.from('email_messages')
-		.select('company_id')
-		.eq('campaign_id', campaignId)
-		.not('company_id', 'is', null);
-	const already = new Set((existing ?? []).map((r) => r.company_id as number));
+	// Zbiór już zmaterializowanych odbiorców kampanii: gdyby był niepełny,
+	// ponowny start kampanii dopisałby duplikaty.
+	const existing = await fetchAllRows<{ company_id: number }>(
+		(from, to) =>
+			db
+				.from('email_messages')
+				.select('company_id')
+				.eq('campaign_id', campaignId)
+				.not('company_id', 'is', null)
+				.order('id')
+				.range(from, to),
+		'email_messages'
+	);
+	const already = new Set(existing.map((r) => r.company_id));
 
 	// Budujemy wszystkie wiersze w pamięci, a potem wstawiamy HURTOWO (chunk).
 	// Round-trip do bazy per odbiorca przekracza limit ~50 subrequestów pojedynczego
@@ -754,24 +778,28 @@ export async function enqueueCategoryBlast(
 	if (!category) throw new Error('Nie znaleziono aktywnej kategorii');
 	const code = category.code as string;
 
-	const { data: rows, error: coErr } = await db
-		.from('crm_companies')
-		.select(COMPANY_COLUMNS)
-		.limit(20000);
-	if (coErr) throw new Error(`crm_companies: ${coErr.message}`);
-	const companies = ((rows ?? []) as CrmCompany[]).filter(
-		(c) => normalizeInterest(c.ubezpieczenie) === code
+	const rows = await fetchAllRows<CrmCompany>(
+		(from, to) => db.from('crm_companies').select(COMPANY_COLUMNS).order('id').range(from, to),
+		'crm_companies'
 	);
+	const companies = rows.filter((c) => normalizeInterest(c.ubezpieczenie) === code);
 
 	// Kontakty już obsłużone w tej kategorii: wysłane lub czekające w kolejce.
-	const { data: existing, error: exErr } = await db
-		.from('email_messages')
-		.select('company_id, status')
-		.eq('category_id', categoryId)
-		.not('company_id', 'is', null)
-		.in('status', ['queued', 'sending', 'sent']);
-	if (exErr) throw new Error(`email_messages: ${exErr.message}`);
-	const handled = new Set((existing ?? []).map((r) => r.company_id as number));
+	// Ta lista decyduje, komu NIE wysyłamy ponownie. Przycięta do db_max_rows
+	// oznaczałaby duplikaty maili, więc czytamy ją stronami.
+	const existing = await fetchAllRows<{ company_id: number }>(
+		(from, to) =>
+			db
+				.from('email_messages')
+				.select('company_id, status')
+				.eq('category_id', categoryId)
+				.not('company_id', 'is', null)
+				.in('status', ['queued', 'sending', 'sent'])
+				.order('id')
+				.range(from, to),
+		'email_messages'
+	);
+	const handled = new Set(existing.map((r) => r.company_id));
 
 	const result: CategoryBlastResult = {
 		code,
@@ -892,14 +920,19 @@ export async function enqueueAutoSend(db: SupabaseClient): Promise<AutoSendResul
 		if (!since) continue;
 		const sinceMs = Date.parse(since);
 
-		const { data: existing, error: exErr } = await db
-			.from('email_messages')
-			.select('company_id')
-			.eq('category_id', categoryId)
-			.not('company_id', 'is', null)
-			.in('status', ['queued', 'sending', 'sent']);
-		if (exErr) throw new Error(`email_messages: ${exErr.message}`);
-		const handled = new Set((existing ?? []).map((r) => r.company_id as number));
+		const existing = await fetchAllRows<{ company_id: number }>(
+			(from, to) =>
+				db
+					.from('email_messages')
+					.select('company_id')
+					.eq('category_id', categoryId)
+					.not('company_id', 'is', null)
+					.in('status', ['queued', 'sending', 'sent'])
+					.order('id')
+					.range(from, to),
+			'email_messages'
+		);
+		const handled = new Set(existing.map((r) => r.company_id));
 
 		const toInsert: Record<string, unknown>[] = [];
 		for (const c of companies) {

@@ -261,6 +261,22 @@ skrótu — niesolony hash adresu IPv4 jest odwracalny w kilka sekund.
 
 ## Limity i pułapki
 
+> ### ⚠️ PostgREST tnie odpowiedzi do 1000 wierszy (`db_max_rows`)
+>
+> Zapytanie z `.limit(20000)` **nie zwraca błędu** — dostaje status 200 i po cichu
+> przyciętą odpowiedź (nagłówek `Content-Range: 0-999/*`). Przez to lista wysyłek w
+> „Bazie Klientów" przestała się pokazywać, gdy `email_messages` przekroczyło 1000
+> pasujących wierszy, a eksport SMS i dobór odbiorców kampanii po cichu pomijały
+> resztę bazy.
+>
+> Pełne listy czytaj wyłącznie przez `fetchAllRows()` z `src/lib/server/supabase.ts`,
+> które stronicuje po `.range()`. Zapytanie **musi** mieć jednoznaczne sortowanie
+> (np. `.order('id')`), inaczej kolejne strony pogubią wiersze. Builder zapytania
+> buduj od nowa w każdej stronie — ponowne użycie jednego obiektu doklejałoby
+> `order`/`range` przy każdym przebiegu.
+
+
+
 - Cała wiadomość ≤ 40 MB; Base64 dokłada ~33% → bezpieczny łączny rozmiar załączników
   ~28 MB (pilnowane przy uploadzie i przed wysyłką).
 - Załączniki działają tylko przy wysyłce pojedynczej (nie batch) — stąd kolejka.
