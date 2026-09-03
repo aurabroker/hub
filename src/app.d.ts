@@ -13,6 +13,11 @@ declare global {
 			user: User | null;
 			isAdmin: boolean;
 		}
+
+		/** Kontekst runtime Cloudflare Workers (adapter-cloudflare). */
+		interface Platform {
+			context?: { waitUntil(promise: Promise<unknown>): void };
+		}
 	}
 }
 

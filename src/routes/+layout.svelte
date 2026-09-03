@@ -36,7 +36,9 @@
 			label: 'Konfiguracja',
 			items: [
 				{ href: '/library', title: 'Biblioteka załączników', icon: '⎘' },
-				{ href: '/categories', title: 'Kategorie', icon: '☰' }
+				{ href: '/categories', title: 'Kategorie', icon: '☰' },
+				{ href: '/utm', title: 'UTM — generator', icon: '⚯' },
+				{ href: '/utm/raport', title: 'UTM — raport', icon: '◈' }
 			]
 		}
 	];

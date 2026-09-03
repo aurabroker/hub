@@ -50,6 +50,9 @@ Niezalogowani/nieuprawnieni są przekierowywani na `/login`. Publiczne trasy (be
 | `/categories` | Konfiguracja sekcji: szablon Resend, temat, nadawca, aktywność |
 | `/messages` | Log wiadomości z filtrami (status / źródło / kategoria) |
 | `/duplicates` | Grupy duplikatów wg e-mail / NIP z akcją „oznacz” (nic nie jest usuwane automatycznie) |
+| `/utm` | **Generator linków UTM** — budowanie otagowanych linków ze słowników, biblioteka linków, krótkie linki `/l/{slug}` z licznikiem kliknięć, kody QR, skracanie w Bitly |
+| `/utm/slowniki` | Serwisy Aura i kanoniczne wartości `utm_*` |
+| `/utm/raport` | Skuteczność kampanii: kliknięcia (własne + Bitly) zestawione z leadami |
 
 ## Uruchomienie
 
@@ -133,6 +136,115 @@ Uwaga: open tracking bywa niedokładny (blokowanie obrazków, prefetch, Apple Ma
 Protection, przycinanie w Gmailu) — kliknięcia to pewniejszy sygnał; dashboard opisuje
 otwarcia jako orientacyjne.
 
+## Moduł UTM
+
+Zakładka `/utm` generuje linki do naszych serwisów z parametrami `utm_*`, żeby dało się
+policzyć, skąd faktycznie przychodzą leady. Migracja
+`supabase/migrations/20260903091944_utm_module.sql` tworzy:
+
+- tabele `utm_destinations` (serwisy), `utm_presets` (słowniki wartości), `utm_links`
+  (wygenerowane linki), `utm_clicks` (kliknięcia własnego przekierowania),
+  `utm_attributions` (źródło leada) — wszystkie z RLS (polityki tylko dla adminów),
+- funkcję `public.utm_slugify(text)` — normalizacja wartości parametru (polskie znaki na
+  ASCII, małe litery, spacje na myślnik); jej bliźniak w TypeScript to `slugifyUtm`
+  w `src/lib/utm.ts` i **obie muszą dawać ten sam wynik**,
+- widoki `utm_link_stats` (kliknięcia w oknach 7/30 dni) oraz `utm_campaign_performance`
+  (kliknięcia zestawione z leadami),
+- seed serwisów (auraexpert.pl, auraconsulting.pl, utratadochodu.pl, grupowe.pro,
+  gwarancje.pro, rozwod.waw.pl) i słowników źródeł/mediów.
+
+Tabele CRM nie są modyfikowane. `utm_attributions.company_id` celowo **nie ma klucza
+obcego** do `crm_companies` — moduł nie zakłada żadnego więzu na tabelach CRM.
+
+### Dwie drogi na stronę, dwa liczniki
+
+| Droga | Adres | Kto liczy kliknięcia |
+|---|---|---|
+| Własne przekierowanie | `hub.auraexpert.pl/l/{slug}` | HUB, tabela `utm_clicks`, bez limitu |
+| Skrót Bitly | `bit.ly/…` (lub własna domena) | Bitly; do HUB trafiają przyciskiem „Statystyki Bitly” |
+
+Krótki link Bitly celuje **prosto w adres docelowy**, więc jego kliknięcia nie przechodzą
+przez `/l/`. Bez synchronizacji raport pokazywałby dla takich linków zero.
+
+Skracanie w Bitly jest zawsze świadomym kliknięciem, nigdy automatem — plan Starter ma
+**50 linków na miesiąc**, a licznik zużycia widać nad listą linków. Bez `BITLY_TOKEN`
+przycisk jest ukryty; krótki link można wtedy wkleić ręcznie w edycji linku.
+
+Trasa `/l/{slug}` jest publiczna (prefiks dodany w `src/hooks.server.ts`). Linki
+zarchiwizowane nadal przekierowują — raz wydrukowana ulotka nie przestaje działać, bo
+ktoś schował link w panelu.
+
+### Automatyczne UTM-y w mailach
+
+Przy wysyłce linki w treści dostają `utm_source=email`, `utm_medium=email`,
+`utm_campaign` = kod sekcji, `utm_content` = nazwa kampanii masowej (albo
+`szybka-wysylka`). Linki, które już mają `utm_source`, zostają nietknięte — ręcznie
+wklejony link z biblioteki UTM ma pierwszeństwo.
+
+> ⚠️ Działa to **tylko dla sekcji z własną treścią HTML** (`email_categories.html_body`,
+> czyli treść z Edytora e-mail). Sekcje oparte o hostowany szablon Resend mają treść po
+> stronie Resend — tam parametry `utm_*` trzeba wpisać ręcznie w szablonie.
+
+### Atrybucja leadów — co trzeba zrobić na landingach
+
+Tabela `utm_attributions` sama się nie napełni. Endpoint `POST /api/webhooks/utm-attribution`
+przyjmuje dane z **backendu landingu**, chroniony nagłówkiem `x-utm-secret`
+(wartość `UTM_INGEST_SECRET`).
+
+Endpoint **świadomie nie ma CORS** — nie wolno wołać go z JavaScriptu w przeglądarce,
+bo sekret byłby jawny dla każdego, kto otworzy podgląd źródła, i każdy mógłby zaśmiecić
+raport. Landing ma przekazać parametry UTM do swojego backendu razem z formularzem,
+a backend wywołuje ten endpoint.
+
+Krok 1 — na landingu zapamiętaj parametry przy wejściu i dołóż je do formularza:
+
+```html
+<script>
+  const q = new URLSearchParams(location.search);
+  const keys = ['utm_source','utm_medium','utm_campaign','utm_content','utm_term','gclid','fbclid'];
+  if (keys.some((k) => q.has(k))) {
+    sessionStorage.setItem('aura_utm', JSON.stringify({
+      ...Object.fromEntries(keys.filter((k) => q.has(k)).map((k) => [k, q.get(k)])),
+      landing_url: location.href,
+      referrer: document.referrer,
+      first_seen_at: new Date().toISOString()
+    }));
+  }
+  // przed wysłaniem formularza wstaw zawartość sessionStorage w ukryte pole „utm"
+</script>
+```
+
+Krok 2 — backend landingu, po zapisaniu leada, woła HUB:
+
+```
+POST https://hub.auraexpert.pl/api/webhooks/utm-attribution
+x-utm-secret: <UTM_INGEST_SECRET>
+content-type: application/json
+
+{ "email": "klient@example.com", "utm_source": "facebook", "utm_medium": "cpc",
+  "utm_campaign": "wiosna-2026", "utm_content": "baner-a",
+  "landing_url": "https://grupowe.pro/?utm_source=facebook",
+  "referrer": "https://www.facebook.com/", "slug": "abc1234" }
+```
+
+Pola opcjonalne: `company_id`, `lead_intake_id`, `slug` (slug krótkiego linku — wiąże
+lead z konkretnym linkiem z biblioteki), `gclid`, `fbclid`, `first_seen_at`. Gdy
+`company_id` nie zostanie podane, HUB dopina lead do kontaktu w `crm_companies` po
+adresie e-mail (tabela CRM jest wyłącznie czytana).
+
+### Kody QR
+
+Kod QR generuje `GET /utm/qr/{id}` jako SVG (trasa pod bramką admina). Parametry:
+`?cel=krotki` (domyślnie, przez `/l/` — kliknięcia liczone w HUB) albo `?cel=pelny`
+(prosto na adres z UTM), `?px=` (rozmiar, 128–2048), `?pobierz=1` (wymusza pobranie).
+PNG składany jest w przeglądarce z pobranego SVG.
+
+### Prywatność
+
+`utm_clicks.ip_hash` to SHA-256 z adresu IP **posolony** wartością `UTM_INGEST_SECRET`.
+Surowy adres IP nie jest nigdzie zapisywany, a przy braku sekretu nie zapisujemy nawet
+skrótu — niesolony hash adresu IPv4 jest odwracalny w kilka sekund.
+
 ## RODO (wymóg twardy)
 
 - **Zgody RODO są zebrane dla całej bazy Klientów** (potwierdzone przez właściciela
@@ -148,6 +260,22 @@ otwarcia jako orientacyjne.
   wypisu i jest logowana.
 
 ## Limity i pułapki
+
+> ### ⚠️ PostgREST tnie odpowiedzi do 1000 wierszy (`db_max_rows`)
+>
+> Zapytanie z `.limit(20000)` **nie zwraca błędu** — dostaje status 200 i po cichu
+> przyciętą odpowiedź (nagłówek `Content-Range: 0-999/*`). Przez to lista wysyłek w
+> „Bazie Klientów" przestała się pokazywać, gdy `email_messages` przekroczyło 1000
+> pasujących wierszy, a eksport SMS i dobór odbiorców kampanii po cichu pomijały
+> resztę bazy.
+>
+> Pełne listy czytaj wyłącznie przez `fetchAllRows()` z `src/lib/server/supabase.ts`,
+> które stronicuje po `.range()`. Zapytanie **musi** mieć jednoznaczne sortowanie
+> (np. `.order('id')`), inaczej kolejne strony pogubią wiersze. Builder zapytania
+> buduj od nowa w każdej stronie — ponowne użycie jednego obiektu doklejałoby
+> `order`/`range` przy każdym przebiegu.
+
+
 
 - Cała wiadomość ≤ 40 MB; Base64 dokłada ~33% → bezpieczny łączny rozmiar załączników
   ~28 MB (pilnowane przy uploadzie i przed wysyłką).

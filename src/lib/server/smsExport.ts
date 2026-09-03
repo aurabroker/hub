@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { hasRodoConsent, normalizeInterest, CODE_LABELS } from '$lib/categories';
 import { isMobile, normalizePhone, splitName, type SmsContact } from '$lib/sms/csv';
+import { fetchAllRows } from '$lib/server/supabase';
 
 export interface SmsExportFilters {
 	/** Kody kanoniczne kategorii; puste = wszystkie. */
@@ -32,10 +33,14 @@ export async function collectSmsContacts(
 	db: SupabaseClient,
 	filters: SmsExportFilters
 ): Promise<{ contacts: SmsContact[]; stats: SmsExportStats }> {
-	const { data, error } = await db.from('crm_companies').select(COLUMNS).limit(20000);
-	if (error) throw new Error(`crm_companies: ${error.message}`);
+	// .limit(20000) było tu iluzją: PostgREST i tak oddawał tylko db_max_rows
+	// wierszy, więc eksport po cichu pomijał resztę bazy.
+	const data = await fetchAllRows(
+		(from, to) => db.from('crm_companies').select(COLUMNS).order('id').range(from, to),
+		'crm_companies'
+	);
 
-	const rows = (data ?? []) as {
+	const rows = data as {
 		id: number;
 		company: string | null;
 		contact: string | null;
