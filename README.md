@@ -140,7 +140,7 @@ otwarcia jako orientacyjne.
 
 Zakładka `/utm` generuje linki do naszych serwisów z parametrami `utm_*`, żeby dało się
 policzyć, skąd faktycznie przychodzą leady. Migracja
-`supabase/migrations/20260903120000_utm_module.sql` tworzy:
+`supabase/migrations/20260903091944_utm_module.sql` tworzy:
 
 - tabele `utm_destinations` (serwisy), `utm_presets` (słowniki wartości), `utm_links`
   (wygenerowane linki), `utm_clicks` (kliknięcia własnego przekierowania),
