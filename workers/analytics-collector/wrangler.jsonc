@@ -1,0 +1,38 @@
+{
+	"name": "aura-analytics-collector",
+	"main": "index.ts",
+	"compatibility_date": "2026-09-01",
+
+	// Worker ma być osiągalny wyłącznie przez trasy na mierzonych hostach.
+	// Adres *.workers.dev byłby drugim, niekontrolowanym wejściem.
+	"workers_dev": false,
+
+	// Dataset Analytics Engine. Powstaje sam przy pierwszym zapisie —
+	// nie trzeba go zakładać osobno.
+	"analytics_engine_datasets": [{ "binding": "WEB_EVENTS", "dataset": "web_events" }],
+
+	// Dobowa sól do skrótu odwiedzającego (wariant B z CLAUDE.md).
+	// Klucze wygasają po 48 godzinach, więc przestrzeń nie rośnie.
+	"kv_namespaces": [{ "binding": "VISITOR_SALT", "id": "e3d7ef83448e4a5288b3cddedd31af6e" }],
+
+	// Mierzone hosty. Warianty z www są tu celowo: Worker i tak sprowadza host
+	// do postaci bez prefiksu, więc statystyki się nie rozjeżdżają, ale bez
+	// trasy ruch z www w ogóle by przez niego nie przeszedł.
+	//
+	// Utworzenie tras wymaga uprawnienia Workers Routes, którego token konta
+	// nie ma. Jeśli `wrangler deploy` odbije się o brak uprawnień, wdróż
+	// z zakomentowaną sekcją "routes" i dodaj wpisy ręcznie w panelu
+	// Cloudflare, w każdej strefie w sekcji Workers Routes.
+	"routes": [
+		{ "pattern": "utratadochodu.pl/*", "zone_name": "utratadochodu.pl" },
+		{ "pattern": "www.utratadochodu.pl/*", "zone_name": "utratadochodu.pl" },
+		{ "pattern": "auraconsulting.pl/*", "zone_name": "auraconsulting.pl" },
+		{ "pattern": "www.auraconsulting.pl/*", "zone_name": "auraconsulting.pl" },
+		{ "pattern": "cyber.auraconsulting.pl/*", "zone_name": "auraconsulting.pl" },
+		{ "pattern": "zarzad.auraconsulting.pl/*", "zone_name": "auraconsulting.pl" },
+		{ "pattern": "beautypolisa.eu/*", "zone_name": "beautypolisa.eu" },
+		{ "pattern": "www.beautypolisa.eu/*", "zone_name": "beautypolisa.eu" }
+	],
+
+	"observability": { "enabled": true }
+}

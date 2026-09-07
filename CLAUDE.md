@@ -1,0 +1,243 @@
+# Własna analityka webowa
+
+> Ten plik opisuje **moduł analityki** Aura HUB. Reszta projektu (wysyłka e-maili,
+> baza klientów, moduł UTM) jest opisana w `README.md`.
+
+Zbieramy statystyki ruchu po stronie serwera, przechowujemy w Cloudflare
+Analytics Engine i pokazujemy we własnym panelu wewnątrz HUB.
+
+Powód: zewnętrzny skrypt analityczny spowalnia stronę, jest wycinany przez
+blokery (więc liczby są zaniżone o nieznaną wartość), wysyła dane osób trzecich
+i wymusza baner zgody. Pomiar po stronie serwera nie ma tych wad.
+
+## Architektura
+
+```
+przeglądarka → Cloudflare → [collector Worker] → origin
+                                   ↓ (waitUntil)
+                            Analytics Engine
+                                   ↓
+                      HUB /analityka (SvelteKit) ← SQL API
+                                   ↓
+                            D1 (archiwum dzienne)
+```
+
+- **collector Worker** (`workers/analytics-collector/`) — na trasach mierzonych
+  hostów, zapisuje zdarzenia
+- **panel** — trasa `/analityka` w aplikacji HUB, za istniejącą bramką
+  administratora (`public.is_platform_admin()`), odpytuje SQL API po stronie serwera
+- **D1** — dzienne podsumowania, bo Analytics Engine trzyma dane 3 miesiące
+
+### Dlaczego panel w HUB, a nie osobny Worker za Cloudflare Access
+
+HUB ma już działającą bramkę administratora, layout i nawigację. Trasa w HUB
+oznacza jeden adres, jedno logowanie i zero konfiguracji Zero Trust. Cena:
+awaria HUB zabiera też panel analityki. Uznaliśmy to za akceptowalne, bo panel
+jest narzędziem roboczym, a nie usługą dla klientów.
+
+## Schemat danych
+
+Dataset: `web_events`. Jeden schemat dla wszystkich typów zdarzeń.
+Mapowanie w kodzie: stała `FIELDS` na górze `workers/analytics-collector/index.ts`.
+
+| Pole | Zawartość | Uwagi |
+|---|---|---|
+| `index1` | host | jedyny indeks, niska liczność |
+| `blob1` | host | bez prefiksu `www.` |
+| `blob2` | ścieżka | bez query stringu, identyfikatory zamienione na `:id`, max 256 znaków |
+| `blob3` | typ zdarzenia | `pageview` \| `vital` \| nazwa zdarzenia własnego |
+| `blob4` | kraj | z `request.cf.country` |
+| `blob5` | host referrera | sam host, nigdy pełny adres. Puste = wejście bezpośrednie |
+| `blob6` | klasa urządzenia | `mobile` \| `tablet` \| `desktop` \| `bot` |
+| `blob7` | rodzina przeglądarki | `chrome`, `safari`, `firefox`, `other` |
+| `blob8` | skrót odwiedzającego | wariant B, patrz niżej |
+| `blob9` | szczegół | kod odpowiedzi dla `pageview`, nazwa wskaźnika dla `vital` |
+| `double1` | wartość | czas odpowiedzi w ms albo wartość Web Vital |
+
+**Kolejność pól jest kontraktem.** SQL API zwraca `blob1`, `blob2` bez nazw,
+więc zmiana kolejności po cichu wywraca wszystkie zapytania i panel.
+Jeśli trzeba coś dodać, dokładamy na końcu. Nigdy w środku.
+
+## Mierzone hosty
+
+| Host | Strefa |
+|---|---|
+| utratadochodu.pl | utratadochodu.pl |
+| auraconsulting.pl | auraconsulting.pl |
+| cyber.auraconsulting.pl | auraconsulting.pl |
+| zarzad.auraconsulting.pl | auraconsulting.pl |
+| beautypolisa.eu | beautypolisa.eu |
+
+`hub.auraexpert.pl` celowo **nie jest** mierzony — to panel wewnętrzny i jego
+ruch zaśmiecałby statystyki klientów. Dodanie kolejnego hosta to jedna trasa
+w panelu Cloudflare plus wpis w `wrangler.jsonc`, bez zmian w kodzie.
+
+## Trzy pułapki, które psują liczby
+
+### 1. Próbkowanie
+
+Przy większym ruchu Analytics Engine zapisuje próbkę zdarzeń, nie wszystkie.
+Każdy wiersz ma pole `_sample_interval` mówiące, ile realnych zdarzeń
+reprezentuje.
+
+```sql
+-- ŹLE, zaniżone i bezużyteczne
+SELECT count() FROM web_events
+
+-- DOBRZE
+SELECT SUM(_sample_interval) AS odslony FROM web_events
+```
+
+Dotyczy też średnich i percentyli. Percentyl liczymy funkcją
+`quantileExactWeighted(q)(kolumna, _sample_interval)` — inaczej pojedyncze
+rzadkie zdarzenie ma taką samą wagę jak tysiąc częstych.
+
+### 2. Strefa czasowa
+
+Timestampy są w UTC, panel pokazuje `Europe/Warsaw`. Wieczorem to różnica
+dnia, nie tylko godziny. Do tego zmiana czasu dwa razy w roku.
+Nie da się tego załatwić stałym przesunięciem o godzinę.
+
+Rozwiązanie jest w samym SQL: `toStartOfInterval` i `formatDateTime` przyjmują
+nazwę strefy jako ostatni argument.
+
+```sql
+toStartOfInterval(timestamp, INTERVAL '1' DAY, 'Europe/Warsaw') AS dzien
+```
+
+### 3. Liczność ścieżek
+
+Bez normalizacji `/zamowienie/48213` i `/zamowienie/48214` to dwie różne
+pozycje. Po tygodniu lista top stron ma dziesiątki tysięcy wpisów i nie mówi
+nic. Segmenty wyglądające na identyfikatory zamieniamy na `:id` przy zapisie
+(`looksLikeId()` w collectorze).
+
+## Zasady prywatności
+
+1. **Zero ciasteczek.** Bez wyjątków.
+2. **Surowy IP nigdy nie jest zapisywany.** Może być użyty wyłącznie jako
+   wejście do skrótu, w pamięci, bez trafiania do bazy.
+3. **Query stringi nie są zapisywane.** Trafiają tam tokeny resetu hasła,
+   identyfikatory sesji i dane osobowe wklejone przez pomyłkę.
+4. **Referrer skracany do samego hosta.** Pełny adres strony, z której ktoś
+   przyszedł, potrafi zawierać zapytanie wyszukiwarki albo identyfikator.
+5. **User-Agent nie jest zapisywany w całości.** Tylko klasa urządzenia
+   i rodzina przeglądarki. Pełny ciąg to element odcisku przeglądarki.
+
+### Liczenie unikalnych odwiedzin
+
+**Wybrany wariant:** **B** — skrót z IP, User-Agenta, hosta i daty, z solą
+rotowaną co dobę.
+**Decyzja podjęta przez:** właściciela projektu (biuro@utratadochodu.com)
+**dnia:** 2026-09-07.
+
+**Uzasadnienie:** wariant A (same odsłony) odbiera najważniejszą liczbę
+biznesową, czyli ilu ludzi faktycznie było na stronie. Wariant C (sól co
+godzinę) zawyża dzienne liczby, bo ta sama osoba wracająca po przerwie liczy
+się ponownie. Wariant B daje użyteczną metrykę przy identyfikatorze, który
+przestaje cokolwiek znaczyć po dobie. HUB stosuje już ten sam wzorzec w module
+UTM (`utm_clicks.ip_hash`), przy czym tam sól jest stała — wariant B jest więc
+ostrożniejszy niż rozwiązanie już działające w projekcie.
+
+**Jak to działa:** `SHA-256(IP + User-Agent + host + data + sól)`, skrócone do
+16 bajtów. Sól losowana raz na dobę warszawską, trzymana w KV `VISITOR_SALT`
+z wygaśnięciem po 48 godzinach. Wczorajszych skrótów nie da się zestawić
+z dzisiejszymi — także nam.
+
+**Świadomy koszt:** unikalni nie łączą się między dniami, więc nie policzymy
+osób powracających w dłuższym okresie. Suma unikalnych dziennych jest wyższa
+niż rzeczywista liczba osób w tygodniu.
+
+**Zastrzeżenie:** wariant B tworzy identyfikator pseudonimowy. To, czy w świetle
+RODO wymaga zgody, jest kwestią interpretacji i nie ma tu jednoznacznej
+odpowiedzi. Decyzję podjął człowiek, nie agent.
+
+## Zasady techniczne
+
+1. **Pomiar nigdy nie blokuje użytkownika.** Zapis idzie przez
+   `ctx.waitUntil()`, w try/catch, który przełyka błędy (logując je do
+   `wrangler tail`). Awaria analityki nie ma prawa zepsuć strony.
+2. **Token API tylko jako sekret po stronie serwera.** Nigdy w kodzie klienta,
+   nigdy w repozytorium. Zapytania SQL wykonuje wyłącznie serwer.
+3. **Panel za bramką administratora HUB.** Nie budujemy własnego logowania
+   i nie ruszamy warstwy autoryzacji Supabase (patrz `README.md`).
+4. **Zero zależności z CDN w panelu.** Mamy restrykcyjną politykę CSP
+   i nie robimy dla panelu wyjątków. Wykresy jako inline SVG.
+5. **Wyniki zapytań cache'owane 60 sekund** przez Cache API.
+6. **Endpoint `/__vitals` to wejście publiczne.** Waliduj Origin, zakresy
+   wartości i częstotliwość zgłoszeń.
+7. **Zadanie cron musi być idempotentne** i nie może nadpisywać danych
+   pustym wynikiem. Pusty wynik to prawdopodobnie błąd zapytania.
+
+## Stan wdrożenia
+
+| Element | Status | Data | Uwagi |
+|---|---|---|---|
+| collector Worker | kod gotowy, niewdrożony | 2026-09-07 | czeka na `wrangler deploy` i zgodę |
+| trasy na mierzonych hostach | do zrobienia ręcznie | | token konta nie ma uprawnienia Workers Routes |
+| przestrzeń KV `VISITOR_SALT` | utworzona | 2026-09-07 | `e3d7ef83448e4a5288b3cddedd31af6e` |
+| panel `/analityka` w HUB | do zrobienia | | sesja 2 |
+| Web Vitals | do zrobienia | | sesja 3 |
+| archiwum D1 | do zrobienia | | sesja 3 |
+
+## Dane konta
+
+```
+Account ID:   1f52c869d091ebf55a2d1789dad4842d
+Dataset:      web_events
+Retencja AE:  3 miesiące (zweryfikowane w dokumentacji 2026-09-07)
+Sekret:       ANALYTICS_TOKEN (uprawnienie Account Analytics: Read)
+```
+
+### Zweryfikowane limity Analytics Engine
+
+Stan dokumentacji na 2026-09-07. Te wartości się zmieniają — sprawdzaj,
+nie ufaj pamięci.
+
+| Limit | Wartość |
+|---|---|
+| Blobów na punkt danych | 20 |
+| Doubles na punkt danych | 20 |
+| Indeksów na punkt danych | 1 |
+| Łączny rozmiar blobów | 16 kB |
+| Maksymalny rozmiar indeksu | 96 bajtów |
+| Punktów danych na wywołanie Workera | 250 |
+| Retencja | 3 miesiące |
+
+Nasz schemat używa 9 blobów, 1 double i 1 indeksu — mieści się z zapasem.
+
+## Przydatne komendy
+
+```bash
+# Zapytanie do Analytics Engine
+curl -s "https://api.cloudflare.com/client/v4/accounts/1f52c869d091ebf55a2d1789dad4842d/analytics_engine/sql" \
+  -H "Authorization: Bearer TOKEN" \
+  -d "SELECT blob2 AS sciezka, SUM(_sample_interval) AS odslony
+      FROM web_events
+      WHERE timestamp > now() - INTERVAL '1' DAY AND blob3 = 'pageview'
+      GROUP BY sciezka ORDER BY odslony DESC LIMIT 20"
+
+# Wdrożenie collectora
+cd workers/analytics-collector && npx wrangler deploy
+
+# Logi na żywo
+npx wrangler tail aura-analytics-collector
+
+# Archiwum (sesja 3)
+npx wrangler d1 execute analytics-archive --remote \
+  --command "SELECT * FROM daily_summary ORDER BY date DESC LIMIT 10"
+```
+
+## Czego to nie zastąpi
+
+Analityka po stronie serwera nie widzi tego, co dzieje się w przeglądarce
+bez przeładowania strony: przewijania, kliknięć, zdarzeń w aplikacji SPA.
+Nawigacja w aplikacji jednostronicowej wymaga jawnego zgłoszenia zdarzenia
+z kodu frontu.
+
+Core Web Vitals też są mierzone wyłącznie w przeglądarce, stąd osobny
+skrypt kliencki. To jedyny element działający po stronie użytkownika.
+
+Wykrywanie botów opiera się u nas na wzorcach User-Agenta, bo
+`request.cf.botManagement` wymaga płatnego Bot Management, a nasze strefy są
+na planie Free. Kod czyta wynik Bot Management, jeśli kiedyś się pojawi.
