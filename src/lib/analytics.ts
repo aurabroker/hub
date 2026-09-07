@@ -61,6 +61,8 @@ export const PROBE_PATH_PATTERNS = [
 	'%id_rsa%',
 	'%wp-config%',
 	'%wp-includes%',
+	'%wp-content%',
+	'%wp-json%',
 	'%/vendor/%',
 	'%/actuator%',
 	'%/telescope%',
@@ -78,6 +80,41 @@ export const PROBE_PATH_PATTERNS = [
 	'%.bak',
 	'%key.json%'
 ] as const;
+
+/**
+ * Kanał ruchu: jedno zdanie o tym, skąd naprawdę przyszedł odwiedzający.
+ *
+ * Sama lista hostów referrera jest za drobna, żeby coś z niej wyczytać —
+ * `google.com` i `l.facebook.com` obok siebie nie mówią, czy ruch idzie
+ * z wyszukiwarki czy z social mediów. Grupujemy więc do pięciu kategorii.
+ *
+ * Kolejność sprawdzania ma znaczenie. Asystenci AI idą pierwsi, bo ChatGPT
+ * dokleja `utm_source=chatgpt.com` i inaczej wpadłby do kampanii.
+ */
+export const CHANNELS = [
+	'Asystenci AI',
+	'Wyszukiwarki',
+	'Media społecznościowe',
+	'Kampanie',
+	'Polecenia',
+	'Wejścia bezpośrednie'
+] as const;
+
+export type Channel = (typeof CHANNELS)[number];
+
+export function trafficChannel(referrer: string, utmSource: string): Channel {
+	const both = `${referrer} ${utmSource}`.toLowerCase();
+	if (/chatgpt|openai|perplexity|claude\.ai|gemini|copilot|phind/.test(both)) return 'Asystenci AI';
+	if (/google|bing|duckduckgo|yahoo|yandex|ecosia|brave|seznam/.test(both)) return 'Wyszukiwarki';
+	if (/facebook|instagram|linkedin|lnkd\.in|t\.co|twitter|x\.com|tiktok|youtube|pinterest|reddit|wykop/.test(both))
+		return 'Media społecznościowe';
+	if (utmSource) return 'Kampanie';
+	if (!referrer) return 'Wejścia bezpośrednie';
+	return 'Polecenia';
+}
+
+/** Dni tygodnia w kolejności, w jakiej zwraca je `formatDateTime(..., '%w')`: 0 = niedziela. */
+export const WEEKDAYS = ['Nd', 'Pn', 'Wt', 'Śr', 'Cz', 'Pt', 'So'] as const;
 
 /** Strefa, w której panel pokazuje czas. Timestampy w bazie są w UTC. */
 export const PANEL_TIMEZONE = 'Europe/Warsaw';

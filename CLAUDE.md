@@ -118,6 +118,29 @@ Parametry `utm_*` są wyłącznie w pierwszym żądaniu. Bez ciasteczka nie
 przeniesiemy ich na kolejne podstrony, więc mierzymy **strony wejścia
 z kampanii**, a nie całą ścieżkę odwiedzającego.
 
+## Co pokazuje panel
+
+Układ jest ułożony wg tego, jak często się w coś patrzy, a nie wg tego, co
+łatwo policzyć.
+
+| Sekcja | Odpowiada na pytanie |
+|---|---|
+| Cztery kafelki | Ilu ludzi, ile odsłon, jak szybko, ile automatów |
+| Wykres odsłon | Czy ruch rośnie i kiedy były skoki |
+| Najczęściej odwiedzane strony | Co ludzie faktycznie czytają |
+| Kanały ruchu | Skąd przychodzą: wyszukiwarki, social, asystenci AI, kampanie, polecenia, wejścia bezpośrednie |
+| Serwisy | Który z ośmiu serwisów żyje (tylko przy filtrze „wszystkie") |
+| Kiedy Cię czytają | Mapa dzień tygodnia × godzina — kiedy publikować i wysyłać |
+| Ruch z kampanii | Wejścia z parametrami `utm_*` |
+| Adresy z błędem | Zepsute linki na własnych stronach, bez skanerów |
+
+Kraje, urządzenia, przeglądarki i surowe adresy odsyłające są w zwiniętej
+sekcji na dole. Są rzadko potrzebne, a rozpychały widok.
+
+**Kanały wylicza `trafficChannel`** w `src/lib/analytics.ts`, po stronie
+serwera, a nie w SQL. To jest decyzja biznesowa (ChatGPT to asystent, nie
+kampania), więc ma być w jednym miejscu i dać się przetestować.
+
 ## Trzy pułapki, które psują liczby
 
 ### 1. Próbkowanie

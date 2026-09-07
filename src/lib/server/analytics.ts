@@ -1,8 +1,11 @@
 import { env } from '$env/dynamic/private';
 import {
+	CHANNELS,
 	PANEL_TIMEZONE,
 	PROBE_PATH_PATTERNS,
 	RANGES,
+	trafficChannel,
+	type Channel,
 	type RangeKey,
 	type TopRow
 } from '$lib/analytics';
@@ -38,9 +41,19 @@ export type Totals = {
 	pageviews: number;
 	visitors: number;
 	avgResponseMs: number;
+	p75ResponseMs: number;
 	errorShare: number;
 	botShare: number;
 };
+
+/** Jeden serwis w porównaniu między stronami. */
+export type HostRow = { host: string; pageviews: number; visitors: number };
+
+/** Jedna komórka mapy godzin: dzień tygodnia 0–6 (0 = niedziela), godzina 0–23. */
+export type HeatCell = { day: number; hour: number; value: number };
+
+/** Adres, który odpowiedział błędem — kandydat na zepsuty link. */
+export type BrokenRow = { path: string; status: string; value: number };
 
 export class AnalyticsConfigError extends Error {}
 
@@ -176,6 +189,7 @@ export async function loadTotals(win: Window, host: string | null): Promise<Tota
 	const [summary, unique] = await Promise.all([
 		runQuery(`SELECT SUM(_sample_interval)                                   AS odslony,
                  SUM(double1 * _sample_interval) / SUM(_sample_interval) AS sredni_czas_ms,
+                 quantileExactWeighted(0.75)(double1, _sample_interval)  AS p75_czas_ms,
                  sumIf(_sample_interval, toUInt32(blob9) >= 400)         AS bledy,
                  sumIf(_sample_interval, blob6 = 'bot')                  AS boty
           FROM ${DATASET} WHERE ${where(win, host, 'pageview')}`),
@@ -191,6 +205,7 @@ export async function loadTotals(win: Window, host: string | null): Promise<Tota
 		pageviews,
 		visitors: num(unique[0]?.unikalni),
 		avgResponseMs: Math.round(num(row.sredni_czas_ms)),
+		p75ResponseMs: Math.round(num(row.p75_czas_ms)),
 		errorShare: pageviews ? num(row.bledy) / pageviews : 0,
 		botShare: pageviews ? num(row.boty) / pageviews : 0
 	};
@@ -325,4 +340,91 @@ export async function loadActiveHosts(win: Window): Promise<string[]> {
        GROUP BY host ORDER BY odslony DESC`
 	);
 	return rows.map((r) => String(r.host ?? '')).filter(Boolean);
+}
+
+/**
+ * Porównanie serwisów: odsłony i odwiedzający na każdej ze stron.
+ *
+ * Sens ma tylko przy filtrze „wszystkie". Przy ośmiu serwisach to pierwsza
+ * rzecz, którą chce się zobaczyć: który z nich w ogóle żyje.
+ */
+export async function loadHostBreakdown(win: Window): Promise<HostRow[]> {
+	const rows = await runQuery(
+		`SELECT blob1 AS host, SUM(_sample_interval) AS odslony, COUNT(DISTINCT blob8) AS unikalni
+       FROM ${DATASET} WHERE ${where(win, null, 'pageview')}${WITHOUT_BOTS}
+       GROUP BY host ORDER BY odslony DESC`
+	);
+	return rows.map((r) => ({
+		host: String(r.host ?? ''),
+		pageviews: num(r.odslony),
+		visitors: num(r.unikalni)
+	}));
+}
+
+/**
+ * Kanały ruchu: skąd naprawdę przychodzą ludzie.
+ *
+ * Grupowanie robimy po stronie serwera, a nie w SQL, bo klasyfikacja to logika
+ * biznesowa (ChatGPT to asystent, nie kampania) i chcemy ją mieć w jednym
+ * miejscu, testowalną, zamiast rozsypaną po wyrażeniach `if()` w zapytaniu.
+ */
+export async function loadChannels(win: Window, host: string | null): Promise<TopRow[]> {
+	const rows = await runQuery(
+		`SELECT blob5 AS referrer, blob10 AS zrodlo, SUM(_sample_interval) AS n
+       FROM ${DATASET} WHERE ${where(win, host, 'pageview')}${WITHOUT_BOTS}
+       GROUP BY referrer, zrodlo`
+	);
+
+	const totals = new Map<Channel, number>();
+	for (const r of rows) {
+		const channel = trafficChannel(String(r.referrer ?? ''), String(r.zrodlo ?? ''));
+		totals.set(channel, (totals.get(channel) ?? 0) + num(r.n));
+	}
+
+	const sum = [...totals.values()].reduce((a, b) => a + b, 0);
+	return CHANNELS.filter((c) => totals.has(c))
+		.map((c) => ({ label: c, value: totals.get(c) ?? 0, share: sum ? (totals.get(c) ?? 0) / sum : 0 }))
+		.sort((a, b) => b.value - a.value);
+}
+
+/**
+ * Mapa godzin: kiedy ludzie faktycznie czytają strony.
+ *
+ * `formatDateTime` przyjmuje strefę jako trzeci argument, więc dzień tygodnia
+ * i godzina są warszawskie, nie UTC. Funkcje `toHour` i `toDayOfWeek` strefy
+ * nie przyjmują i dałyby wynik przesunięty o godzinę lub dwie.
+ */
+export async function loadHeatmap(win: Window, host: string | null): Promise<HeatCell[]> {
+	const rows = await runQuery(
+		`SELECT formatDateTime(timestamp, '%w', '${PANEL_TIMEZONE}') AS dzien,
+             formatDateTime(timestamp, '%H', '${PANEL_TIMEZONE}') AS godzina,
+             SUM(_sample_interval)                                AS n
+       FROM ${DATASET} WHERE ${where(win, host, 'pageview')}${WITHOUT_BOTS}
+       GROUP BY dzien, godzina`
+	);
+	return rows.map((r) => ({
+		day: num(r.dzien),
+		hour: num(r.godzina),
+		value: num(r.n)
+	}));
+}
+
+/**
+ * Adresy, które odpowiedziały błędem — kandydaci na zepsute linki.
+ *
+ * Skanery odsiewamy tą samą listą co w top stronach, inaczej cała tabela byłaby
+ * nimi zapełniona i nie dałoby się wypatrzyć prawdziwej literówki w linku.
+ */
+export async function loadBrokenPaths(win: Window, host: string | null): Promise<BrokenRow[]> {
+	const rows = await runQuery(
+		`SELECT blob2 AS sciezka, blob9 AS kod, SUM(_sample_interval) AS n
+       FROM ${DATASET} WHERE ${where(win, host, 'pageview')}${WITHOUT_BOTS}
+         AND toUInt32(blob9) >= 400${WITHOUT_PROBES}
+       GROUP BY sciezka, kod ORDER BY n DESC LIMIT ${TOP_LIMIT}`
+	);
+	return rows.map((r) => ({
+		path: String(r.sciezka ?? ''),
+		status: String(r.kod ?? ''),
+		value: num(r.n)
+	}));
 }

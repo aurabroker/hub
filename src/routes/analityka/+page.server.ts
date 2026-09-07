@@ -8,8 +8,11 @@ import {
 } from '$lib/analytics';
 import {
 	AnalyticsConfigError,
-	loadActiveHosts,
+	loadBrokenPaths,
 	loadCampaigns,
+	loadChannels,
+	loadHeatmap,
+	loadHostBreakdown,
 	loadTimeline,
 	loadTopBrowsers,
 	loadTopCountries,
@@ -17,7 +20,8 @@ import {
 	loadTopPaths,
 	loadTopReferrers,
 	loadTotals,
-	windows
+	windows,
+	type Totals
 } from '$lib/server/analytics';
 import type { PageServerLoad } from './$types';
 
@@ -29,6 +33,16 @@ import type { PageServerLoad } from './$types';
  * Obie wartości przechodzą przez walidację wobec list zamkniętych: host trafia
  * wprost do zapytania SQL, więc dowolny ciąg z adresu byłby dziurą.
  */
+
+const EMPTY_TOTALS: Totals = {
+	pageviews: 0,
+	visitors: 0,
+	avgResponseMs: 0,
+	p75ResponseMs: 0,
+	errorShare: 0,
+	botShare: 0
+};
+
 export const load: PageServerLoad = async ({ url }) => {
 	const rangeParam = url.searchParams.get('zakres');
 	const range: RangeKey = isRangeKey(rangeParam) ? rangeParam : DEFAULT_RANGE;
@@ -37,47 +51,56 @@ export const load: PageServerLoad = async ({ url }) => {
 	const host = isMeasuredHost(hostParam) ? hostParam : null;
 
 	const { current, previous } = windows(range);
+	const base = { range, host, rangeLabel: RANGES[range].label, refreshedAt: new Date().toISOString() };
 
 	try {
 		const [
 			totals,
 			previousTotals,
 			timeline,
+			hostBreakdown,
 			paths,
+			channels,
+			campaigns,
+			broken,
+			heatmap,
 			countries,
-			referrers,
 			devices,
 			browsers,
-			campaigns,
-			activeHosts
+			referrers
 		] = await Promise.all([
 			loadTotals(current, host),
 			loadTotals(previous, host),
 			loadTimeline(current, host, range),
+			loadHostBreakdown(current),
 			loadTopPaths(current, host),
+			loadChannels(current, host),
+			loadCampaigns(current, host),
+			loadBrokenPaths(current, host),
+			loadHeatmap(current, host),
 			loadTopCountries(current, host),
-			loadTopReferrers(current, host),
 			loadTopDevices(current, host),
 			loadTopBrowsers(current, host),
-			loadCampaigns(current, host),
-			loadActiveHosts(current)
+			loadTopReferrers(current, host)
 		]);
 
 		return {
-			range,
-			host,
-			rangeLabel: RANGES[range].label,
-			hosts: MEASURED_HOSTS.filter((h) => activeHosts.includes(h)),
-			refreshedAt: new Date().toISOString(),
+			...base,
+			// Do filtra pokazujemy tylko serwisy, na których w tym oknie coś się działo.
+			hosts: MEASURED_HOSTS.filter((h) => hostBreakdown.some((r) => r.host === h)),
 			totals,
 			previousTotals,
 			timeline,
+			hostBreakdown,
 			paths,
+			channels,
+			campaigns,
+			broken,
+			heatmap,
 			countries,
-			referrers,
 			devices,
 			browsers,
-			campaigns,
+			referrers,
 			error: null as string | null
 		};
 	} catch (e) {
@@ -89,20 +112,21 @@ export const load: PageServerLoad = async ({ url }) => {
 				: `Nie udało się pobrać danych z Analytics Engine. ${e instanceof Error ? e.message : String(e)}`;
 
 		return {
-			range,
-			host,
-			rangeLabel: RANGES[range].label,
+			...base,
 			hosts: [] as string[],
-			refreshedAt: new Date().toISOString(),
-			totals: { pageviews: 0, visitors: 0, avgResponseMs: 0, errorShare: 0, botShare: 0 },
-			previousTotals: { pageviews: 0, visitors: 0, avgResponseMs: 0, errorShare: 0, botShare: 0 },
+			totals: EMPTY_TOTALS,
+			previousTotals: EMPTY_TOTALS,
 			timeline: [] as { label: string; value: number }[],
+			hostBreakdown: [],
 			paths: [],
+			channels: [],
+			campaigns: [],
+			broken: [],
+			heatmap: [],
 			countries: [],
-			referrers: [],
 			devices: [],
 			browsers: [],
-			campaigns: [],
+			referrers: [],
 			error: message
 		};
 	}

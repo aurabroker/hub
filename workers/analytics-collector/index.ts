@@ -88,7 +88,7 @@ const STATIC_EXTENSIONS =
  * procentów, a skanery świadomie tak maskują adresy.
  */
 const PROBE_PATTERN =
-	/(?:^|\/|%2f)(?:\.|%2e)(?:env|git|aws|ssh|svn|hg|vscode|idea)\b|\.php\b|\.bak$|key\.json|service-account|credentials\.json|id_rsa|server-(?:info|status)|wp-config|wp-includes|setup-config\.php|\/vendor\/|\/actuator\b|\/telescope\b|\/cgi-bin\//i;
+	/(?:^|\/|%2f)(?:\.|%2e)(?:env|git|aws|ssh|svn|hg|vscode|idea)\b|\.php\b|\.bak$|key\.json|service-account|credentials\.json|id_rsa|server-(?:info|status)|wp-config|wp-includes|wp-content|wp-json|setup-config\.php|\/vendor\/|\/actuator\b|\/telescope\b|\/cgi-bin\//i;
 
 /**
  * Awaryjne rozpoznawanie botów po User-Agencie. Używane, gdy
