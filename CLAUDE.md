@@ -67,6 +67,7 @@ Jeśli trzeba coś dodać, dokładamy na końcu. Nigdy w środku.
 | cyber.auraconsulting.pl | auraconsulting.pl |
 | zarzad.auraconsulting.pl | auraconsulting.pl |
 | beautypolisa.eu | beautypolisa.eu |
+| rozwod.waw.pl | rozwod.waw.pl |
 
 `hub.auraexpert.pl` celowo **nie jest** mierzony — to panel wewnętrzny i jego
 ruch zaśmiecałby statystyki klientów. Dodanie kolejnego hosta to jedna trasa
@@ -174,7 +175,7 @@ odpowiedzi. Decyzję podjął człowiek, nie agent.
 | Element | Status | Data | Uwagi |
 |---|---|---|---|
 | collector Worker | wdrożony | 2026-09-07 | `aura-analytics-collector`, workers.dev wyłączony |
-| trasy na mierzonych hostach | **do zrobienia ręcznie** | | 8 wpisów w panelu; token konta nie ma uprawnienia Workers Routes |
+| trasy na mierzonych hostach | **do zrobienia ręcznie** | | 10 wpisów w panelu; token konta nie ma uprawnienia Workers Routes |
 | przestrzeń KV `VISITOR_SALT` | utworzona | 2026-09-07 | `e3d7ef83448e4a5288b3cddedd31af6e` |
 | panel `/analityka` w HUB | do zrobienia | | sesja 2 |
 | Web Vitals | do zrobienia | | sesja 3 |

@@ -31,7 +31,9 @@
 		{ "pattern": "cyber.auraconsulting.pl/*", "zone_name": "auraconsulting.pl" },
 		{ "pattern": "zarzad.auraconsulting.pl/*", "zone_name": "auraconsulting.pl" },
 		{ "pattern": "beautypolisa.eu/*", "zone_name": "beautypolisa.eu" },
-		{ "pattern": "www.beautypolisa.eu/*", "zone_name": "beautypolisa.eu" }
+		{ "pattern": "www.beautypolisa.eu/*", "zone_name": "beautypolisa.eu" },
+		{ "pattern": "rozwod.waw.pl/*", "zone_name": "rozwod.waw.pl" },
+		{ "pattern": "www.rozwod.waw.pl/*", "zone_name": "rozwod.waw.pl" }
 	],
 
 	"observability": { "enabled": true }
