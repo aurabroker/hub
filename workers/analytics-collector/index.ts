@@ -56,6 +56,29 @@ interface Env {
 /** Maksymalna długość zapisywanej ścieżki. Dłuższe obcinamy. */
 const MAX_PATH = 256;
 
+/**
+ * Mierzone hosty, w postaci bez prefiksu www.
+ *
+ * Zapisujemy zdarzenie wyłącznie dla tych adresów. Ruch spoza listy leci do
+ * originu normalnie, tylko bez pomiaru — skanery odpytują zmyślone subdomeny
+ * (`910nefpaernhcrd2.auraconsulting.pl` i podobne), a host jest naszym jedynym
+ * indeksem i ma mieć niską liczność. Bez tej listy indeks rósłby o każdą
+ * nazwę, jaką wymyśli bot.
+ *
+ * Dodanie nowego serwisu wymaga wpisu tutaj ORAZ trasy w panelu Cloudflare.
+ * Sama trasa nie wystarczy — świadomy koszt tej osłony.
+ */
+const MEASURED_HOSTS = new Set([
+	'utratadochodu.pl',
+	'auraconsulting.pl',
+	'cyber.auraconsulting.pl',
+	'zarzad.auraconsulting.pl',
+	'beautypolisa.eu',
+	'rozwod.waw.pl',
+	'grupowe.pro',
+	'gwarancje.pro'
+]);
+
 /** Rozszerzenia, dla których nie zapisujemy odsłony — to zasoby, nie strony. */
 const STATIC_EXTENSIONS =
 	/\.(?:js|mjs|cjs|css|map|png|jpe?g|gif|svg|webp|avif|ico|bmp|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|txt|xml)$/i;
@@ -240,7 +263,8 @@ function utmValues(url: URL): string[] {
 }
 
 /** Czy dla tego żądania w ogóle zapisujemy odsłonę. */
-function shouldMeasure(request: Request, url: URL): boolean {
+function shouldMeasure(request: Request, url: URL, host: string): boolean {
+	if (!MEASURED_HOSTS.has(host)) return false;
 	if (request.method !== 'GET') return false;
 	if (url.pathname.startsWith('/api')) return false;
 	if (STATIC_EXTENSIONS.test(url.pathname)) return false;
@@ -252,10 +276,10 @@ async function writePageview(
 	request: Request,
 	env: Env,
 	url: URL,
+	host: string,
 	status: number,
 	durationMs: number
 ): Promise<void> {
-	const host = normalizeHost(url.hostname);
 	const ua = request.headers.get('user-agent') ?? '';
 	const bot = isBot(request.cf, ua);
 
@@ -280,19 +304,20 @@ async function writePageview(
 export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const url = new URL(request.url);
+		const host = normalizeHost(url.hostname);
 
 		const started = Date.now();
 		const response = await fetch(request);
 		const durationMs = Date.now() - started;
 
-		if (shouldMeasure(request, url)) {
+		if (shouldMeasure(request, url, host)) {
 			// waitUntil + try/catch: odpowiedź wraca do użytkownika natychmiast,
 			// a każdy błąd pomiaru przełykamy po cichu. Awaria analityki nie ma
 			// prawa zamienić się w błąd widoczny dla odwiedzającego.
 			ctx.waitUntil(
 				(async () => {
 					try {
-						await writePageview(request, env, url, response.status, durationMs);
+						await writePageview(request, env, url, host, response.status, durationMs);
 					} catch (e) {
 						// Log trafia do `wrangler tail`; cisza w tym miejscu ukrywałaby awarie zapisu.
 						console.error(`analytics: ${e instanceof Error ? e.message : String(e)}`);

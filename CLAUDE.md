@@ -77,8 +77,17 @@ Jeśli trzeba coś dodać, dokładamy na końcu. Nigdy w środku.
 | gwarancje.pro | gwarancje.pro |
 
 `hub.auraexpert.pl` celowo **nie jest** mierzony — to panel wewnętrzny i jego
-ruch zaśmiecałby statystyki klientów. Dodanie kolejnego hosta to jedna trasa
-w panelu Cloudflare plus wpis w `wrangler.jsonc`, bez zmian w kodzie.
+ruch zaśmiecałby statystyki klientów.
+
+Ta lista jest **wpisana na sztywno** w collectorze (`MEASURED_HOSTS`). Ruch na
+adres spoza listy leci do originu normalnie, ale nie jest zapisywany. Powód:
+skanery odpytują zmyślone subdomeny (widzieliśmy
+`910nefpaernhcrd2.auraconsulting.pl`), a host jest naszym jedynym indeksem
+i ma mieć niską liczność.
+
+**Dodanie nowego serwisu wymaga trzech rzeczy:** wpisu w `MEASURED_HOSTS`,
+trasy w `wrangler.jsonc` i trasy w panelu Cloudflare. Sama trasa nie wystarczy —
+to świadomy koszt tej osłony.
 
 ## Kampanie UTM w analityce
 
