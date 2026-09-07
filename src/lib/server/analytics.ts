@@ -289,11 +289,18 @@ export async function loadCampaigns(
 	}));
 }
 
-/** Hosty, dla których w oknie są jakiekolwiek dane — do podpowiedzi w filtrze. */
+/**
+ * Hosty, dla których w oknie są jakiekolwiek dane — do podpowiedzi w filtrze.
+ *
+ * Suma musi być na liście kolumn, mimo że jej nie używamy. Analytics Engine
+ * odrzuca sortowanie po agregacie nieobecnym w SELECT błędem
+ * `unable to find type of column: "_sample_interval"`.
+ */
 export async function loadActiveHosts(win: Window): Promise<string[]> {
 	const rows = await runQuery(
-		`SELECT blob1 AS host FROM ${DATASET} WHERE ${where(win, null, 'pageview')}
-       GROUP BY host ORDER BY SUM(_sample_interval) DESC`
+		`SELECT blob1 AS host, SUM(_sample_interval) AS odslony
+       FROM ${DATASET} WHERE ${where(win, null, 'pageview')}
+       GROUP BY host ORDER BY odslony DESC`
 	);
 	return rows.map((r) => String(r.host ?? '')).filter(Boolean);
 }
