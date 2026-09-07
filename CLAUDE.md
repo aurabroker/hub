@@ -212,9 +212,14 @@ odpowiedzi. Decyzję podjął człowiek, nie agent.
 4. **Zero zależności z CDN w panelu.** Mamy restrykcyjną politykę CSP
    i nie robimy dla panelu wyjątków. Wykresy jako inline SVG.
 5. **Wyniki zapytań cache'owane 60 sekund** przez Cache API.
-6. **Endpoint `/__vitals` to wejście publiczne.** Waliduj Origin, zakresy
+6. **Skanery oznaczamy jako boty, nie pomijamy.** Serwisy odpowiadają kodem 200
+   na `/.env` czy `/phpinfo.php`, a skanery podszywają się pod Chrome, więc ani
+   kod odpowiedzi, ani User-Agent ich nie odsieje. Robi to `PROBE_PATTERN`
+   w collectorze. Udział automatów pozostaje **zaniżony** — bez płatnego Bot
+   Management nie da się tego domknąć.
+7. **Endpoint `/__vitals` to wejście publiczne.** Waliduj Origin, zakresy
    wartości i częstotliwość zgłoszeń.
-7. **Zadanie cron musi być idempotentne** i nie może nadpisywać danych
+8. **Zadanie cron musi być idempotentne** i nie może nadpisywać danych
    pustym wynikiem. Pusty wynik to prawdopodobnie błąd zapytania.
 
 ## Stan wdrożenia
@@ -224,7 +229,7 @@ odpowiedzi. Decyzję podjął człowiek, nie agent.
 | collector Worker | wdrożony | 2026-09-07 | `aura-analytics-collector`, workers.dev wyłączony |
 | trasy na mierzonych hostach | **do zrobienia ręcznie** | | 14 wpisów w panelu; token konta nie ma uprawnienia Workers Routes |
 | przestrzeń KV `VISITOR_SALT` | utworzona | 2026-09-07 | `e3d7ef83448e4a5288b3cddedd31af6e` |
-| panel `/analityka` w HUB | do zrobienia | | sesja 2 |
+| panel `/analityka` w HUB | kod gotowy | 2026-09-07 | wymaga `CF_ACCOUNT_ID` i `ANALYTICS_TOKEN` w Pages |
 | Web Vitals | do zrobienia | | sesja 3 |
 | archiwum D1 | do zrobienia | | sesja 3 |
 
