@@ -173,8 +173,8 @@ odpowiedzi. Decyzję podjął człowiek, nie agent.
 
 | Element | Status | Data | Uwagi |
 |---|---|---|---|
-| collector Worker | kod gotowy, niewdrożony | 2026-09-07 | czeka na `wrangler deploy` i zgodę |
-| trasy na mierzonych hostach | do zrobienia ręcznie | | token konta nie ma uprawnienia Workers Routes |
+| collector Worker | wdrożony | 2026-09-07 | `aura-analytics-collector`, workers.dev wyłączony |
+| trasy na mierzonych hostach | **do zrobienia ręcznie** | | 8 wpisów w panelu; token konta nie ma uprawnienia Workers Routes |
 | przestrzeń KV `VISITOR_SALT` | utworzona | 2026-09-07 | `e3d7ef83448e4a5288b3cddedd31af6e` |
 | panel `/analityka` w HUB | do zrobienia | | sesja 2 |
 | Web Vitals | do zrobienia | | sesja 3 |
@@ -217,7 +217,7 @@ curl -s "https://api.cloudflare.com/client/v4/accounts/1f52c869d091ebf55a2d1789d
       WHERE timestamp > now() - INTERVAL '1' DAY AND blob3 = 'pageview'
       GROUP BY sciezka ORDER BY odslony DESC LIMIT 20"
 
-# Wdrożenie collectora
+# Wdrożenie collectora (po zmianach w kodzie)
 cd workers/analytics-collector && npx wrangler deploy
 
 # Logi na żywo
