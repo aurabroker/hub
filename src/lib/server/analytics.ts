@@ -1,5 +1,11 @@
 import { env } from '$env/dynamic/private';
-import { PANEL_TIMEZONE, RANGES, type RangeKey, type TopRow } from '$lib/analytics';
+import {
+	PANEL_TIMEZONE,
+	PROBE_PATH_PATTERNS,
+	RANGES,
+	type RangeKey,
+	type TopRow
+} from '$lib/analytics';
 
 /**
  * Warstwa zapytań do Cloudflare Analytics Engine (SQL API).
@@ -242,8 +248,24 @@ async function loadTop(
  */
 const WITHOUT_BOTS = ` AND blob6 != 'bot'`;
 
+/**
+ * Wykluczenie ścieżek skanerów po stronie zapytania.
+ *
+ * Duplikuje to, co collector robi już przy zapisie, i jest tu celowo: wiersze
+ * sprzed wdrożenia tamtego filtra mają klasę `desktop`, więc `blob6 != 'bot'`
+ * ich nie odsiewa. Bez tego `/phpinfo.php` i kilkanaście wariantów `/.env`
+ * siedziałyby w top stronach przez całe trzy miesiące retencji.
+ */
+const WITHOUT_PROBES = PROBE_PATH_PATTERNS.map((p) => ` AND blob2 NOT LIKE '${p}'`).join('');
+
 export function loadTopPaths(win: Window, host: string | null) {
-	return loadTop('blob2', win, host, `${WITHOUT_BOTS} AND toUInt32(blob9) < 400`, '(brak)');
+	return loadTop(
+		'blob2',
+		win,
+		host,
+		`${WITHOUT_BOTS} AND toUInt32(blob9) < 400${WITHOUT_PROBES}`,
+		'(brak)'
+	);
 }
 
 export function loadTopCountries(win: Window, host: string | null) {

@@ -78,12 +78,17 @@ const STATIC_EXTENSIONS =
  * rozpoznawanie po User-Agencie ich nie odsiewa — skanery podszywają się pod
  * Chrome na desktopie.
  *
+ * Rozszerzenie `.php` jest tu jako całość, bo żaden z mierzonych serwisów nie
+ * serwuje PHP: w danych `.php` pojawiło się wyłącznie w adresach typu
+ * `/adminfuns.php` czy `/this_is_a_new_hello_world.php`. Gdyby któryś serwis
+ * kiedyś stanął na WordPressie, ten fragment wzorca trzeba usunąć.
+ *
  * Oznaczamy je jako bota, a nie pomijamy: udział automatów ma być widoczny.
  * Wersje z `%2e` i `%2f` są tu dlatego, że `URL.pathname` nie dekoduje
  * procentów, a skanery świadomie tak maskują adresy.
  */
 const PROBE_PATTERN =
-	/(?:^|\/|%2f)(?:\.|%2e)(?:env|git|aws|ssh|svn|hg|vscode|idea)\b|phpinfo|server-(?:info|status)|wp-config|setup-config\.php|\/vendor\/|\/actuator\b|\/telescope\b|\/cgi-bin\//i;
+	/(?:^|\/|%2f)(?:\.|%2e)(?:env|git|aws|ssh|svn|hg|vscode|idea)\b|\.php\b|\.bak$|key\.json|service-account|credentials\.json|id_rsa|server-(?:info|status)|wp-config|wp-includes|setup-config\.php|\/vendor\/|\/actuator\b|\/telescope\b|\/cgi-bin\//i;
 
 /**
  * Awaryjne rozpoznawanie botów po User-Agencie. Używane, gdy

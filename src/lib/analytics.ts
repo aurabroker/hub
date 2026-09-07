@@ -39,6 +39,46 @@ export function isMeasuredHost(value: string | null | undefined): value is Measu
 /** Wiersz tabeli rankingowej: etykieta, liczba odsłon i udział w sumie tabeli. */
 export type TopRow = { label: string; value: number; share: number };
 
+/**
+ * Fragmenty ścieżek, o które pyta wyłącznie skaner podatności.
+ *
+ * Collector oznacza takie żądania jako bota już przy zapisie, więc dla nowych
+ * danych ta lista jest zbędna. Potrzebna jest dla **historii**: Analytics Engine
+ * tylko dopisuje, a wiersze zapisane przed wdrożeniem tamtego filtra mają
+ * klasę `desktop` i inaczej siedziałyby w top stronach aż do końca retencji.
+ *
+ * Wzorce w składni SQL LIKE, gdzie `%` zastępuje dowolny ciąg.
+ */
+export const PROBE_PATH_PATTERNS = [
+	'%/.env%',
+	'%phpinfo%',
+	'%service-account%',
+	'%credentials.json%',
+	'%/.git%',
+	'%/.aws%',
+	'%/.ssh%',
+	'%/.npmrc%',
+	'%id_rsa%',
+	'%wp-config%',
+	'%wp-includes%',
+	'%/vendor/%',
+	'%/actuator%',
+	'%/telescope%',
+	'%/cgi-bin/%',
+	'%server-info%',
+	'%server-status%',
+	'%2eenv%',
+	'%2egit%',
+	// Uzgodnienia przeglądarki z serwerem, nie strony. Collector ich już nie
+	// zapisuje, ale wiersze sprzed tamtej zmiany zostają do końca retencji.
+	'%/.well-known/%',
+	// Żaden z mierzonych serwisów nie serwuje PHP — każde .php to skaner.
+	// Gdyby któryś kiedyś stanął na WordPressie, ten wzorzec trzeba usunąć.
+	'%.php%',
+	'%.bak',
+	'%key.json%'
+] as const;
+
 /** Strefa, w której panel pokazuje czas. Timestampy w bazie są w UTC. */
 export const PANEL_TIMEZONE = 'Europe/Warsaw';
 

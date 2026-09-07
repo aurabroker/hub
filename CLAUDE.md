@@ -217,6 +217,17 @@ odpowiedzi. Decyzję podjął człowiek, nie agent.
    kod odpowiedzi, ani User-Agent ich nie odsieje. Robi to `PROBE_PATTERN`
    w collectorze. Udział automatów pozostaje **zaniżony** — bez płatnego Bot
    Management nie da się tego domknąć.
+
+   Ten sam filtr istnieje **drugi raz** po stronie zapytania panelu
+   (`PROBE_PATH_PATTERNS` w `src/lib/analytics.ts`). To nie jest przypadek:
+   Analytics Engine tylko dopisuje, więc wiersze zapisane przed wdrożeniem
+   filtra mają klasę `desktop` i bez tego siedziałyby w top stronach przez
+   całe trzy miesiące retencji.
+
+   Wśród wzorców jest `.php` oraz `wp-includes`, bo **żaden z mierzonych
+   serwisów nie serwuje PHP** — w danych te rozszerzenia pojawiły się wyłącznie
+   w adresach typu `/adminfuns.php`. Gdyby któryś serwis stanął kiedyś na
+   WordPressie, oba wzorce trzeba usunąć z obu miejsc.
 7. **Endpoint `/__vitals` to wejście publiczne.** Waliduj Origin, zakresy
    wartości i częstotliwość zgłoszeń.
 8. **Zadanie cron musi być idempotentne** i nie może nadpisywać danych
