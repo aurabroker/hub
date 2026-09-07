@@ -52,6 +52,11 @@ Mapowanie w kodzie: stała `FIELDS` na górze `workers/analytics-collector/index
 | `blob7` | rodzina przeglądarki | `chrome`, `safari`, `firefox`, `other` |
 | `blob8` | skrót odwiedzającego | wariant B, patrz niżej |
 | `blob9` | szczegół | kod odpowiedzi dla `pageview`, nazwa wskaźnika dla `vital` |
+| `blob10` | `utm_source` | znormalizowany, puste gdy brak |
+| `blob11` | `utm_medium` | znormalizowany |
+| `blob12` | `utm_campaign` | znormalizowany |
+| `blob13` | `utm_content` | znormalizowany |
+| `blob14` | `utm_term` | znormalizowany |
 | `double1` | wartość | czas odpowiedzi w ms albo wartość Web Vital |
 
 **Kolejność pól jest kontraktem.** SQL API zwraca `blob1`, `blob2` bez nazw,
@@ -68,10 +73,41 @@ Jeśli trzeba coś dodać, dokładamy na końcu. Nigdy w środku.
 | zarzad.auraconsulting.pl | auraconsulting.pl |
 | beautypolisa.eu | beautypolisa.eu |
 | rozwod.waw.pl | rozwod.waw.pl |
+| grupowe.pro | grupowe.pro |
+| gwarancje.pro | gwarancje.pro |
 
 `hub.auraexpert.pl` celowo **nie jest** mierzony — to panel wewnętrzny i jego
 ruch zaśmiecałby statystyki klientów. Dodanie kolejnego hosta to jedna trasa
 w panelu Cloudflare plus wpis w `wrangler.jsonc`, bez zmian w kodzie.
+
+## Kampanie UTM w analityce
+
+Collector zapisuje pięć parametrów `utm_*` ze strony wejścia, w polach
+`blob10`–`blob14`. To jedyny wyjątek od zasady o query stringach i jest wąski
+z premedytacją: czytamy wartości spod pięciu znanych nazw, nigdy całego query
+stringu. `gclid` i `fbclid` pomijamy, bo to identyfikatory reklamowe.
+
+Wartości normalizuje **ta sama funkcja**, której używa generator linków —
+collector importuje `slugifyUtm` z `src/lib/utm.ts`, zamiast trzymać własną
+kopię. Bliźniak SQL (`public.utm_slugify`) pozostaje jeden; trzecia niezależna
+implementacja byłaby trzecią okazją do rozjechania się.
+
+### Trzy liczniki, trzy różne rzeczy
+
+| Licznik | Co mierzy | Gdzie |
+|---|---|---|
+| `utm_clicks` | kliknięcie krótkiego linku `/l/{slug}` | Supabase |
+| Bitly | kliknięcie skrótu bit.ly | API Bitly |
+| `web_events` z `utm_*` | wejście, które **doszło** na stronę | Analytics Engine |
+
+Różnica między kliknięciem a wejściem jest sama w sobie informacją: mówi, ilu
+ludzi odpada między kliknięciem a załadowaniem strony.
+
+### Ograniczenie
+
+Parametry `utm_*` są wyłącznie w pierwszym żądaniu. Bez ciasteczka nie
+przeniesiemy ich na kolejne podstrony, więc mierzymy **strony wejścia
+z kampanii**, a nie całą ścieżkę odwiedzającego.
 
 ## Trzy pułapki, które psują liczby
 
@@ -118,8 +154,10 @@ nic. Segmenty wyglądające na identyfikatory zamieniamy na `:id` przy zapisie
 1. **Zero ciasteczek.** Bez wyjątków.
 2. **Surowy IP nigdy nie jest zapisywany.** Może być użyty wyłącznie jako
    wejście do skrótu, w pamięci, bez trafiania do bazy.
-3. **Query stringi nie są zapisywane.** Trafiają tam tokeny resetu hasła,
-   identyfikatory sesji i dane osobowe wklejone przez pomyłkę.
+3. **Query stringi nie są zapisywane** — z jednym wąskim wyjątkiem na parametry
+   `utm_*` (patrz „Kampanie UTM w analityce"). Poza nimi query string jest
+   wyrzucany w całości: trafiają tam tokeny resetu hasła, identyfikatory sesji
+   i dane osobowe wklejone przez pomyłkę. `gclid` i `fbclid` **nie** są zapisywane.
 4. **Referrer skracany do samego hosta.** Pełny adres strony, z której ktoś
    przyszedł, potrafi zawierać zapytanie wyszukiwarki albo identyfikator.
 5. **User-Agent nie jest zapisywany w całości.** Tylko klasa urządzenia
@@ -175,7 +213,7 @@ odpowiedzi. Decyzję podjął człowiek, nie agent.
 | Element | Status | Data | Uwagi |
 |---|---|---|---|
 | collector Worker | wdrożony | 2026-09-07 | `aura-analytics-collector`, workers.dev wyłączony |
-| trasy na mierzonych hostach | **do zrobienia ręcznie** | | 10 wpisów w panelu; token konta nie ma uprawnienia Workers Routes |
+| trasy na mierzonych hostach | **do zrobienia ręcznie** | | 14 wpisów w panelu; token konta nie ma uprawnienia Workers Routes |
 | przestrzeń KV `VISITOR_SALT` | utworzona | 2026-09-07 | `e3d7ef83448e4a5288b3cddedd31af6e` |
 | panel `/analityka` w HUB | do zrobienia | | sesja 2 |
 | Web Vitals | do zrobienia | | sesja 3 |
@@ -205,7 +243,7 @@ nie ufaj pamięci.
 | Punktów danych na wywołanie Workera | 250 |
 | Retencja | 3 miesiące |
 
-Nasz schemat używa 9 blobów, 1 double i 1 indeksu — mieści się z zapasem.
+Nasz schemat używa 14 blobów, 1 double i 1 indeksu — mieści się z zapasem.
 
 ## Przydatne komendy
 

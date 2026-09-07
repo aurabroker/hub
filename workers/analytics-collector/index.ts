@@ -6,9 +6,16 @@
  * Analytics Engine. Zapis idzie przez ctx.waitUntil() w try/catch — użytkownik
  * nigdy nie czeka na pomiar, a awaria analityki nie ma prawa zepsuć strony.
  *
- * Bez ciasteczek, bez skryptu w przeglądarce, bez surowych adresów IP
- * i bez query stringów. Zasady i uzasadnienie: CLAUDE.md w katalogu głównym.
+ * Bez ciasteczek, bez skryptu w przeglądarce i bez surowych adresów IP.
+ * Z query stringu bierzemy wyłącznie pięć nazwanych parametrów utm_*,
+ * reszta jest wyrzucana. Zasady i uzasadnienie: CLAUDE.md w katalogu głównym.
  */
+
+// Ta sama funkcja normalizująca, której używa generator linków UTM w HUB.
+// Import zamiast kopii: README ostrzega, że bliźniaki utm_slugify muszą dawać
+// identyczny wynik, a trzecia niezależna implementacja to trzecia okazja do
+// rozjechania się. `src/lib/utm.ts` nie ma importów, więc wchodzi do bundla czysto.
+import { slugifyUtm, UTM_KEYS } from '../../src/lib/utm';
 
 /**
  * Mapowanie pól Analytics Engine.
@@ -32,6 +39,12 @@ const FIELDS = {
 	blob7: "rodzina przeglądarki: 'chrome' | 'safari' | 'firefox' | 'other'",
 	blob8: 'skrót odwiedzającego (wariant B: sól rotowana co dobę)',
 	blob9: "szczegół: kod odpowiedzi dla 'pageview', nazwa wskaźnika dla 'vital'",
+	// Dołożone 2026-09-07, na końcu schematu — kolejność wcześniejszych pól bez zmian.
+	blob10: 'utm_source (znormalizowany), puste gdy brak',
+	blob11: 'utm_medium (znormalizowany)',
+	blob12: 'utm_campaign (znormalizowany)',
+	blob13: 'utm_content (znormalizowany)',
+	blob14: 'utm_term (znormalizowany)',
 	double1: 'wartość: czas odpowiedzi originu w ms albo wartość Web Vital'
 } as const;
 
@@ -204,6 +217,28 @@ async function visitorHash(request: Request, env: Env, host: string): Promise<st
 	return [...new Uint8Array(digest).slice(0, 16)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** Maksymalna długość zapisywanej wartości utm_*. Ucina literówki-potwory. */
+const MAX_UTM = 64;
+
+/**
+ * Pięć parametrów utm_* z adresu, w kolejności z UTM_KEYS.
+ *
+ * To jedyny wyjątek od zasady „nie zapisujemy query stringów" i jest wąski
+ * z premedytacją: bierzemy wartości spod pięciu znanych nazw, nigdy całego
+ * query stringu. Świadomie pomijamy gclid i fbclid — to identyfikatory
+ * reklamowe, czyli dokładnie ta klasa danych, której tu unikamy.
+ *
+ * Wartości normalizujemy tą samą funkcją co generator linków w HUB, żeby
+ * `Wiosna 2026` i `wiosna-2026` były w panelu jedną kampanią, a nie dwiema.
+ *
+ * Parametry są tylko w pierwszym żądaniu. Bez ciasteczka nie przeniesiemy ich
+ * na kolejne podstrony, więc mierzymy strony wejścia z kampanii, nie całą
+ * ścieżkę odwiedzającego.
+ */
+function utmValues(url: URL): string[] {
+	return UTM_KEYS.map((key) => slugifyUtm(url.searchParams.get(key)).slice(0, MAX_UTM));
+}
+
 /** Czy dla tego żądania w ogóle zapisujemy odsłonę. */
 function shouldMeasure(request: Request, url: URL): boolean {
 	if (request.method !== 'GET') return false;
@@ -235,7 +270,8 @@ async function writePageview(
 			deviceClass(ua, bot),
 			browserFamily(ua),
 			await visitorHash(request, env, host),
-			String(status)
+			String(status),
+			...utmValues(url)
 		],
 		doubles: [durationMs]
 	});

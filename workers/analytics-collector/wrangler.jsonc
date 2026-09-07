@@ -33,7 +33,11 @@
 		{ "pattern": "beautypolisa.eu/*", "zone_name": "beautypolisa.eu" },
 		{ "pattern": "www.beautypolisa.eu/*", "zone_name": "beautypolisa.eu" },
 		{ "pattern": "rozwod.waw.pl/*", "zone_name": "rozwod.waw.pl" },
-		{ "pattern": "www.rozwod.waw.pl/*", "zone_name": "rozwod.waw.pl" }
+		{ "pattern": "www.rozwod.waw.pl/*", "zone_name": "rozwod.waw.pl" },
+		{ "pattern": "grupowe.pro/*", "zone_name": "grupowe.pro" },
+		{ "pattern": "www.grupowe.pro/*", "zone_name": "grupowe.pro" },
+		{ "pattern": "gwarancje.pro/*", "zone_name": "gwarancje.pro" },
+		{ "pattern": "www.gwarancje.pro/*", "zone_name": "gwarancje.pro" }
 	],
 
 	"observability": { "enabled": true }
