@@ -16,6 +16,8 @@
 // identyczny wynik, a trzecia niezależna implementacja to trzecia okazja do
 // rozjechania się. `src/lib/utm.ts` nie ma importów, więc wchodzi do bundla czysto.
 import { slugifyUtm, UTM_KEYS } from '../../src/lib/utm';
+// Lista mierzonych hostów jest wspólna z panelem — jedna definicja, zero drifty.
+import { MEASURED_HOSTS } from '../../src/lib/analytics';
 
 /**
  * Mapowanie pól Analytics Engine.
@@ -57,31 +59,31 @@ interface Env {
 const MAX_PATH = 256;
 
 /**
- * Mierzone hosty, w postaci bez prefiksu www.
- *
- * Zapisujemy zdarzenie wyłącznie dla tych adresów. Ruch spoza listy leci do
- * originu normalnie, tylko bez pomiaru — skanery odpytują zmyślone subdomeny
- * (`910nefpaernhcrd2.auraconsulting.pl` i podobne), a host jest naszym jedynym
- * indeksem i ma mieć niską liczność. Bez tej listy indeks rósłby o każdą
- * nazwę, jaką wymyśli bot.
- *
- * Dodanie nowego serwisu wymaga wpisu tutaj ORAZ trasy w panelu Cloudflare.
- * Sama trasa nie wystarczy — świadomy koszt tej osłony.
+ * Mierzone hosty jako zbiór, do szybkiego sprawdzenia przy każdym żądaniu.
+ * Sama lista mieszka w `src/lib/analytics.ts`, wspólna z panelem.
  */
-const MEASURED_HOSTS = new Set([
-	'utratadochodu.pl',
-	'auraconsulting.pl',
-	'cyber.auraconsulting.pl',
-	'zarzad.auraconsulting.pl',
-	'beautypolisa.eu',
-	'rozwod.waw.pl',
-	'grupowe.pro',
-	'gwarancje.pro'
-]);
+const MEASURED = new Set<string>(MEASURED_HOSTS);
 
 /** Rozszerzenia, dla których nie zapisujemy odsłony — to zasoby, nie strony. */
 const STATIC_EXTENSIONS =
 	/\.(?:js|mjs|cjs|css|map|png|jpe?g|gif|svg|webp|avif|ico|bmp|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|txt|xml)$/i;
+
+/**
+ * Ścieżki, o które pyta wyłącznie skaner podatności.
+ *
+ * Powód jest empiryczny: w pierwszych godzinach zbierania zobaczyliśmy
+ * `/.env`, `/phpinfo.php`, `/dashboard/.env` i `/server-info.php` w top
+ * stronach. Te żądania dostają od naszych serwisów odpowiedź 200, bo strony
+ * nie zwracają 404 na nieznany adres, więc ani filtr po kodzie odpowiedzi, ani
+ * rozpoznawanie po User-Agencie ich nie odsiewa — skanery podszywają się pod
+ * Chrome na desktopie.
+ *
+ * Oznaczamy je jako bota, a nie pomijamy: udział automatów ma być widoczny.
+ * Wersje z `%2e` i `%2f` są tu dlatego, że `URL.pathname` nie dekoduje
+ * procentów, a skanery świadomie tak maskują adresy.
+ */
+const PROBE_PATTERN =
+	/(?:^|\/|%2f)(?:\.|%2e)(?:env|git|aws|ssh|svn|hg|vscode|idea)\b|phpinfo|server-(?:info|status)|wp-config|setup-config\.php|\/vendor\/|\/actuator\b|\/telescope\b|\/cgi-bin\//i;
 
 /**
  * Awaryjne rozpoznawanie botów po User-Agencie. Używane, gdy
@@ -181,7 +183,9 @@ function browserFamily(ua: string): string {
  * dostępny; w przeciwnym razie lista wzorców User-Agenta.
  * W skali Cloudflare 1 oznacza pewnego bota, 99 pewnego człowieka.
  */
-function isBot(cf: unknown, ua: string): boolean {
+function isBot(cf: unknown, ua: string, pathname: string): boolean {
+	// Adres, o który pyta tylko skaner, przesądza sprawę niezależnie od reszty.
+	if (PROBE_PATTERN.test(pathname)) return true;
 	const score = (cf as { botManagement?: { score?: number } } | undefined)?.botManagement?.score;
 	if (typeof score === 'number') return score <= 30;
 	return BOT_PATTERN.test(ua);
@@ -264,9 +268,11 @@ function utmValues(url: URL): string[] {
 
 /** Czy dla tego żądania w ogóle zapisujemy odsłonę. */
 function shouldMeasure(request: Request, url: URL, host: string): boolean {
-	if (!MEASURED_HOSTS.has(host)) return false;
+	if (!MEASURED.has(host)) return false;
 	if (request.method !== 'GET') return false;
 	if (url.pathname.startsWith('/api')) return false;
+	// /.well-known/ to uzgodnienia między przeglądarką a serwerem, nie strony.
+	if (url.pathname.startsWith('/.well-known/')) return false;
 	if (STATIC_EXTENSIONS.test(url.pathname)) return false;
 	return true;
 }
@@ -281,7 +287,7 @@ async function writePageview(
 	durationMs: number
 ): Promise<void> {
 	const ua = request.headers.get('user-agent') ?? '';
-	const bot = isBot(request.cf, ua);
+	const bot = isBot(request.cf, ua, url.pathname);
 
 	env.WEB_EVENTS.writeDataPoint({
 		indexes: [host],

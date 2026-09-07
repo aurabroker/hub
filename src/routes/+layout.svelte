@@ -33,6 +33,10 @@
 			]
 		},
 		{
+			label: 'Analityka',
+			items: [{ href: '/analityka', title: 'Ruch na stronach', icon: '◔' }]
+		},
+		{
 			label: 'Konfiguracja',
 			items: [
 				{ href: '/library', title: 'Biblioteka załączników', icon: '⎘' },
