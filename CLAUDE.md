@@ -315,6 +315,19 @@ npx wrangler d1 execute analytics-archive --remote \
   --command "SELECT * FROM daily_summary ORDER BY date DESC LIMIT 10"
 ```
 
+## Ruch płatny na rozwod.waw.pl
+
+To jedyny serwis w grupie, na który leci ruch z Google Ads, więc jako jedyny
+zamienia wolne ładowanie wprost na przepalony budżet.
+
+Prompt audytowy (wydajność reklamowa + widoczność dla modeli) oraz wzór linku
+z parametrami `utm_*` do wklejenia w kampanii: `docs/audyt-rozwod-waw-pl.md`.
+
+**Bez dopisania `utm_*` do adresów docelowych ruch płatny z Google jest
+nie do odróżnienia od organicznego** — Google taguje kliknięcia parametrem
+`gclid`, którego świadomie nie zapisujemy, więc w panelu obie ścieżki lądują
+w kanale „wyszukiwarki".
+
 ## Czego to nie zastąpi
 
 Analityka po stronie serwera nie widzi tego, co dzieje się w przeglądarce
