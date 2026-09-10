@@ -321,11 +321,11 @@ odpowiedzi. Decyzję podjął człowiek, nie agent.
 
 | Element | Status | Data | Uwagi |
 |---|---|---|---|
-| collector Worker | wdrożony | 2026-09-07 | `aura-analytics-collector`, workers.dev wyłączony |
-| trasy na mierzonych hostach | **do zrobienia ręcznie** | | 14 wpisów w panelu; token konta nie ma uprawnienia Workers Routes |
+| collector Worker | wdrożony | 2026-09-10 | `aura-analytics-collector`, workers.dev wyłączony |
+| trasy na mierzonych hostach | działają | | 14 wpisów wpisanych ręcznie; ruch widać ze wszystkich ośmiu hostów |
 | przestrzeń KV `VISITOR_SALT` | utworzona | 2026-09-07 | `e3d7ef83448e4a5288b3cddedd31af6e` |
 | panel `/analityka` w HUB | kod gotowy | 2026-09-07 | wymaga `CF_ACCOUNT_ID` i `ANALYTICS_TOKEN` w Pages |
-| Web Vitals | kod gotowy | 2026-09-10 | wymaga `wrangler deploy` collectora |
+| Web Vitals | wdrożony w collectorze | 2026-09-10 | sekcja w panelu czeka na wdrożenie HUB (merge do `main`) |
 | archiwum D1 | do zrobienia | | sesja 3 |
 
 ## Dane konta
@@ -367,6 +367,13 @@ curl -s "https://api.cloudflare.com/client/v4/accounts/1f52c869d091ebf55a2d1789d
 
 # Wdrożenie collectora (po zmianach w kodzie)
 cd workers/analytics-collector && npx wrangler deploy
+#
+# UWAGA: wrangler kończy się błędem `Authentication error [code: 10000]` na
+# `/zones/…/workers/routes`, bo token konta nie ma uprawnienia Workers Routes.
+# To jest błąd uzgadniania tras, nie wdrożenia — skrypt jest już wtedy wgrany
+# i działa na trasach wpisanych ręcznie. Sprawdzenie, co faktycznie jest na żywo:
+#   curl -s ".../workers/scripts/aura-analytics-collector/deployments"
+#   curl -s ".../workers/scripts/aura-analytics-collector/content/v2"
 
 # Logi na żywo
 npx wrangler tail aura-analytics-collector
