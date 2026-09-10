@@ -20,8 +20,12 @@ import {
 	loadTopPaths,
 	loadTopReferrers,
 	loadTotals,
+	loadVitalPaths,
+	loadVitals,
 	windows,
-	type Totals
+	type Totals,
+	type VitalPathRow,
+	type VitalSummary
 } from '$lib/server/analytics';
 import type { PageServerLoad } from './$types';
 
@@ -67,7 +71,9 @@ export const load: PageServerLoad = async ({ url }) => {
 			countries,
 			devices,
 			browsers,
-			referrers
+			referrers,
+			vitals,
+			vitalPaths
 		] = await Promise.all([
 			loadTotals(current, host),
 			loadTotals(previous, host),
@@ -81,7 +87,12 @@ export const load: PageServerLoad = async ({ url }) => {
 			loadTopCountries(current, host),
 			loadTopDevices(current, host),
 			loadTopBrowsers(current, host),
-			loadTopReferrers(current, host)
+			loadTopReferrers(current, host),
+			loadVitals(current, host),
+			// LCP jest wskaźnikiem, który najczęściej da się naprawić po stronie
+			// strony (obrazek bohatera, font, blokujący skrypt), więc tabela
+			// „gdzie boli" jest właśnie dla niego.
+			loadVitalPaths(current, host, 'LCP')
 		]);
 
 		return {
@@ -101,6 +112,8 @@ export const load: PageServerLoad = async ({ url }) => {
 			devices,
 			browsers,
 			referrers,
+			vitals,
+			vitalPaths,
 			error: null as string | null
 		};
 	} catch (e) {
@@ -127,6 +140,8 @@ export const load: PageServerLoad = async ({ url }) => {
 			devices: [],
 			browsers: [],
 			referrers: [],
+			vitals: [] as VitalSummary[],
+			vitalPaths: [] as VitalPathRow[],
 			error: message
 		};
 	}

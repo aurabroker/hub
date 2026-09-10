@@ -1,6 +1,15 @@
 <script lang="ts">
 	import AreaChart from '$lib/components/AreaChart.svelte';
-	import { RANGES, WEEKDAYS, type RangeKey, type TopRow } from '$lib/analytics';
+	import {
+		RANGES,
+		VITALS,
+		VITAL_MIN_SAMPLES,
+		VITAL_NAMES,
+		WEEKDAYS,
+		vitalRating,
+		type RangeKey,
+		type TopRow
+	} from '$lib/analytics';
 	import type { PageServerData } from './$types';
 
 	let { data }: { data: PageServerData } = $props();
@@ -46,37 +55,59 @@
 			: '—'
 	);
 
-	/** Kafelki. `higherIsBetter` decyduje, czy strzałka w górę jest zielona czy czerwona. */
+	/**
+	 * Kafelki. `higherIsBetter` decyduje, czy strzałka w górę jest zielona czy
+	 * czerwona; `tone` to kolor z palety danych, po którym kafelek się rozpoznaje
+	 * kątem oka — kolor jest tu etykietą, nie ozdobą, więc każdy ma inny.
+	 */
 	let tiles = $derived([
 		{
 			label: 'Odwiedzający',
 			value: nf.format(data.totals.visitors),
 			hint: 'bez botów',
 			d: delta(data.totals.visitors, data.previousTotals.visitors),
-			higherIsBetter: true
+			higherIsBetter: true,
+			tone: 'var(--data-1)'
 		},
 		{
 			label: 'Odsłony',
 			value: nf.format(data.totals.pageviews),
 			hint: `${perVisitor} na osobę`,
 			d: delta(data.totals.pageviews, data.previousTotals.pageviews),
-			higherIsBetter: true
+			higherIsBetter: true,
+			tone: 'var(--data-2)'
 		},
 		{
 			label: 'Czas odpowiedzi',
 			value: `${nf.format(data.totals.p75ResponseMs)} ms`,
 			hint: `75. percentyl, średnia ${nf.format(data.totals.avgResponseMs)} ms`,
 			d: delta(data.totals.p75ResponseMs, data.previousTotals.p75ResponseMs),
-			higherIsBetter: false
+			higherIsBetter: false,
+			tone: 'var(--data-3)'
 		},
 		{
 			label: 'Automaty',
 			value: pct(data.totals.botShare),
 			hint: `błędy ${pct(data.totals.errorShare)}`,
 			d: delta(data.totals.botShare, data.previousTotals.botShare),
-			higherIsBetter: false
+			higherIsBetter: false,
+			tone: 'var(--data-4)'
 		}
 	]);
+
+	/**
+	 * Kolor kanału ruchu. Kanałów jest sześć i są stałym słownikiem, więc każdy
+	 * dostaje własną barwę na stałe — ta sama kategoria ma mieć ten sam kolor
+	 * przy każdym wejściu na stronę, inaczej kolor niczego nie znaczy.
+	 */
+	const CHANNEL_TONE: Record<string, string> = {
+		'Asystenci AI': 'var(--data-3)',
+		Wyszukiwarki: 'var(--data-1)',
+		'Media społecznościowe': 'var(--data-5)',
+		Kampanie: 'var(--data-4)',
+		Polecenia: 'var(--data-2)',
+		'Wejścia bezpośrednie': 'var(--color-text-faint)'
+	};
 
 	let refreshed = $derived(
 		new Date(data.refreshedAt).toLocaleString('pl-PL', {
@@ -110,6 +141,41 @@
 	}
 
 	const HOURS = Array.from({ length: 24 }, (_, h) => h);
+
+	// --- Core Web Vitals -----------------------------------------------------
+
+	/**
+	 * Wskaźnik w postaci gotowej do pokazania: wartość z jednostką, ocena
+	 * i informacja, czy zgłoszeń było dość, żeby percentyl coś znaczył.
+	 * Wskaźniki bez ani jednego zgłoszenia pomijamy — pusty kafelek z kreską
+	 * mówi mniej niż jego brak.
+	 */
+	let vitals = $derived(
+		VITAL_NAMES.map((name) => {
+			const spec = VITALS[name];
+			const row = data.vitals.find((v) => v.name === name);
+			if (!row) return null;
+			return {
+				name,
+				label: spec.label,
+				description: spec.description,
+				text: spec.unit === 'ms' ? `${nf.format(Math.round(row.p75))} ms` : row.p75.toFixed(2).replace('.', ','),
+				rating: vitalRating(name, row.p75),
+				samples: row.samples,
+				thin: row.samples < VITAL_MIN_SAMPLES,
+				// Skala paska: próg „złe" to koniec paska, więc wynik dobry
+				// zajmuje mniej niż połowę i widać to bez czytania liczby.
+				bar: Math.min(1, row.p75 / spec.poor)
+			};
+		}).filter((v) => v !== null)
+	);
+
+	const RATING_LABEL = { good: 'dobrze', mid: 'wymaga poprawy', poor: 'źle' } as const;
+
+	/** Etykieta osi dla tabeli „gdzie boli": ta sama jednostka co w kafelku. */
+	function lcpText(value: number): string {
+		return `${nf.format(Math.round(value))} ms`;
+	}
 
 	/** Zwijane tabele techniczne: kraje, urządzenia, przeglądarki, źródła. */
 	let details: { title: string; head: string; rows: TopRow[] }[] = $derived([
@@ -149,7 +215,7 @@
 
 <div class="tiles">
 	{#each tiles as t (t.label)}
-		<div class="tile">
+		<div class="tile" style="--tone: {t.tone}">
 			<div class="t-label">{t.label}</div>
 			<div class="t-value">
 				{t.value}
@@ -167,11 +233,11 @@
 		<h3>Odsłony w czasie</h3>
 		<span class="faint">{data.range === '24h' ? 'co godzinę' : 'dziennie'}</span>
 	</div>
-	<AreaChart data={data.timeline} />
+	<AreaChart data={data.timeline} color="var(--data-1)" />
 </div>
 
 <div class="grid2">
-	<div class="card">
+	<div class="card" style="--bar: var(--data-2)">
 		<div class="card-head"><h3>Najczęściej odwiedzane strony</h3></div>
 		{#if data.paths.length === 0}
 			<p class="muted small">Brak danych w tym okresie.</p>
@@ -196,7 +262,7 @@
 		{:else}
 			<ul class="rank">
 				{#each data.channels as row (row.label)}
-					<li>
+					<li style="--bar: {CHANNEL_TONE[row.label] ?? 'var(--color-accent)'}">
 						<span class="fill" style="width: {row.share * 100}%"></span>
 						<span class="r-label">{row.label}</span>
 						<span class="r-value">{nf.format(row.value)}</span>
@@ -209,7 +275,7 @@
 </div>
 
 {#if !data.host && data.hostBreakdown.length > 1}
-	<div class="card">
+	<div class="card" style="--bar: var(--data-1)">
 		<div class="card-head">
 			<h3>Serwisy</h3>
 			<span class="faint">odsłony i odwiedzający</span>
@@ -312,6 +378,61 @@
 	</div>
 </div>
 
+<div class="card">
+	<div class="card-head">
+		<h3>Szybkość w przeglądarce</h3>
+		<span class="faint">Core Web Vitals, 75. percentyl</span>
+	</div>
+
+	{#if vitals.length === 0}
+		<p class="muted small">
+			Brak zgłoszeń z przeglądarek w tym okresie. Wskaźniki zbiera skrypt
+			<span class="mono">/__vitals.js</span>, który collector dokłada do stron HTML na mierzonych
+			hostach — jeśli tu pusto, sprawdź, czy Worker ma trasę na tym serwisie i czy polityka CSP
+			serwisu nie blokuje skryptu z własnej domeny.
+		</p>
+	{:else}
+		<div class="vitals">
+			{#each vitals as v (v.name)}
+				<div class="vital" style="--tone: var(--vital-{v.rating})">
+					<div class="v-head">
+						<span class="v-name mono">{v.name}</span>
+						<span class="v-rating">{RATING_LABEL[v.rating]}</span>
+					</div>
+					<div class="v-value">
+						{v.text}
+						{#if v.thin}<span class="v-thin" title="Za mało zgłoszeń, żeby percentyl był pewny">?</span>{/if}
+					</div>
+					<div class="v-track"><span class="v-bar" style="width: {v.bar * 100}%"></span></div>
+					<div class="v-label">{v.label}</div>
+					<div class="v-desc faint">{v.description}</div>
+					<div class="v-desc faint">{nf.format(v.samples)} zgłoszeń</div>
+				</div>
+			{/each}
+		</div>
+
+		{#if data.vitalPaths.length > 0}
+			<h4 class="v-sub">Gdzie boli najbardziej (LCP)</h4>
+			<table class="tbl compact">
+				<thead>
+					<tr><th>Adres</th><th class="num">LCP</th><th class="num">Zgłoszeń</th></tr>
+				</thead>
+				<tbody>
+					{#each data.vitalPaths as row (row.path)}
+						<tr>
+							<td class="mono">{row.path}</td>
+							<td class="num" style="color: var(--vital-{vitalRating('LCP', row.p75)})">
+								{lcpText(row.p75)}
+							</td>
+							<td class="num">{nf.format(row.samples)}</td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+		{/if}
+	{/if}
+</div>
+
 <details class="card details">
 	<summary>Szczegóły techniczne: kraje, urządzenia, przeglądarki, adresy odsyłające</summary>
 	<div class="grid2" style="margin-top: var(--space-4)">
@@ -341,9 +462,12 @@
 	<summary>Core Web Vitals i jak czytać te liczby</summary>
 	<div class="small" style="margin-top: var(--space-3)">
 		<p>
-			<strong>Core Web Vitals.</strong> Szybkość ładowania da się zmierzyć wyłącznie w przeglądarce,
-			więc wymaga osobnego skryptu po stronie klienta. Miejsce jest przygotowane, dane pojawią się po
-			wdrożeniu endpointu <span class="mono">/__vitals</span>.
+			<strong>Core Web Vitals.</strong> Mierzy je skrypt w przeglądarce — serwer tych liczb nie widzi,
+			choćby odpowiadał w kilka milisekund. Zgłoszenie idzie raz na odsłonę, w momencie zniknięcia
+			karty, bez ciasteczek i bez query stringu. <span class="mono">INP</span> jest u nas
+			przybliżony najdłuższą interakcją zamiast wysokim percentylem wszystkich, więc przy stronach
+			z dziesiątkami kliknięć bywa pesymistyczny. Progi oceny pochodzą z Core Web Vitals i
+			<strong>zmieniają się</strong> — przed decyzją opartą na kolorze sprawdź je w źródle.
 		</p>
 		<p>
 			<strong>Automaty.</strong> Rozpoznajemy je po wzorcach adresu i User-Agenta, bo Bot Management
@@ -394,8 +518,8 @@
 		color: var(--color-text);
 	}
 	.chip.on {
-		background: var(--color-primary);
-		border-color: var(--color-primary);
+		background: var(--color-accent);
+		border-color: var(--color-accent);
 		color: #fff;
 	}
 
@@ -405,11 +529,22 @@
 		gap: var(--space-3);
 		margin-bottom: var(--space-4);
 	}
+	/* Kafelek trzyma swój kolor w zmiennej --tone: pasek u góry i liczba biorą
+	   go stamtąd, więc zmiana koloru kafelka to jedno miejsce w skrypcie. */
 	.tile {
+		position: relative;
 		background: var(--color-surface);
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-md);
 		padding: var(--space-3) var(--space-4);
+		overflow: hidden;
+	}
+	.tile::before {
+		content: '';
+		position: absolute;
+		inset: 0 0 auto 0;
+		height: 3px;
+		background: var(--tone, var(--color-accent));
 	}
 	.t-label {
 		font-size: var(--text-xs);
@@ -424,6 +559,8 @@
 		display: flex;
 		align-items: baseline;
 		gap: 0.4rem;
+		color: var(--tone, var(--color-text));
+		font-variant-numeric: tabular-nums;
 	}
 	.t-delta {
 		font-size: var(--text-xs);
@@ -490,13 +627,18 @@
 	.rank li + li {
 		margin-top: 2px;
 	}
+	/* Pasek udziału bierze kolor z --bar ustawionego na karcie albo na wierszu.
+	   Domyślny akcent zostaje dla list, które własnego koloru nie potrzebują. */
 	.fill {
 		position: absolute;
 		inset: 0 auto 0 0;
-		background: var(--color-primary);
-		opacity: 0.14;
+		background: var(--bar, var(--color-accent));
+		opacity: 0.18;
 		border-radius: var(--radius-sm);
 		pointer-events: none;
+	}
+	.rank li:hover .fill {
+		opacity: 0.3;
 	}
 	.r-label {
 		position: relative;
@@ -547,11 +689,78 @@
 	}
 	.hc {
 		aspect-ratio: 1;
-		background: var(--color-primary);
+		background: var(--data-1);
 		border-radius: 2px;
 		min-height: 10px;
 		outline: 1px solid var(--color-border);
 		outline-offset: -1px;
+	}
+
+	/* Wskaźniki: siatka kafelków, każdy w kolorze swojej oceny. Kolor jest tu
+	   jedynym szybkim sygnałem, więc obok niego zawsze stoi słowo — sam kolor
+	   nie wystarcza komuś, kto go nie rozróżnia. */
+	.vitals {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+		gap: var(--space-3);
+	}
+	.vital {
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		padding: var(--space-3);
+		background: color-mix(in srgb, var(--tone) 6%, transparent);
+	}
+	.v-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: var(--space-2);
+	}
+	.v-name {
+		font-size: var(--text-xs);
+		font-weight: 600;
+		color: var(--color-text-muted);
+	}
+	.v-rating {
+		font-size: 0.65rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--tone);
+		font-weight: 600;
+	}
+	.v-value {
+		font-size: 1.4rem;
+		font-weight: 600;
+		line-height: 1.3;
+		color: var(--tone);
+		font-variant-numeric: tabular-nums;
+	}
+	.v-thin {
+		font-size: var(--text-xs);
+		color: var(--color-text-faint);
+		cursor: help;
+	}
+	.v-track {
+		height: 4px;
+		border-radius: 999px;
+		background: var(--color-border);
+		overflow: hidden;
+		margin: var(--space-2) 0;
+	}
+	.v-bar {
+		display: block;
+		height: 100%;
+		background: var(--tone);
+	}
+	.v-label {
+		font-size: var(--text-sm);
+	}
+	.v-desc {
+		font-size: var(--text-xs);
+	}
+	.v-sub {
+		margin: var(--space-5) 0 var(--space-2);
+		font-size: var(--text-sm);
 	}
 
 	.details summary {

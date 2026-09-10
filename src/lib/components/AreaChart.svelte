@@ -6,7 +6,7 @@
 
 	let {
 		data,
-		color = 'var(--color-primary)',
+		color = 'var(--data-1)',
 		height = 200
 	}: { data: Point[]; color?: string; height?: number } = $props();
 

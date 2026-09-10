@@ -144,3 +144,93 @@ export const DEFAULT_RANGE: RangeKey = '7d';
 export function isRangeKey(value: string | null | undefined): value is RangeKey {
 	return !!value && Object.prototype.hasOwnProperty.call(RANGES, value);
 }
+
+// --- Core Web Vitals -------------------------------------------------------
+
+/**
+ * Wskaźniki mierzone w przeglądarce, z progami oceny.
+ *
+ * Plik czyta i panel, i collector: panel bierze stąd progi i etykiety,
+ * collector — listę dozwolonych nazw i górne ograniczenia wartości, którymi
+ * broni publicznego endpointu `/__vitals`. Jedna definicja, więc nie da się
+ * przyjąć wskaźnika, którego panel nie umie pokazać.
+ *
+ * `good` i `poor` to progi 75. percentyla wg Core Web Vitals (web.dev).
+ * Wartości poniżej `good` są dobre, powyżej `poor` złe, między nimi
+ * „wymaga poprawy". PROGI SIĘ ZMIENIAJĄ — Google dodał INP w miejsce FID
+ * w 2024 — więc przed podejmowaniem decyzji sprawdź je w źródle, zamiast
+ * ufać tej tabeli. Stan wpisany 2026-09-10, nie zweryfikowany w tej sesji:
+ * środowisko, w którym powstawał ten kod, nie miało dostępu do web.dev.
+ *
+ * `max` nie ma nic wspólnego z oceną. To granica sensu: zgłoszenie powyżej
+ * niej jest błędem skryptu albo próbą zaśmiecenia danych i leci do kosza.
+ */
+export const VITALS = {
+	LCP: {
+		label: 'Największy element',
+		description: 'kiedy widać główną treść',
+		unit: 'ms',
+		good: 2500,
+		poor: 4000,
+		max: 120_000
+	},
+	INP: {
+		label: 'Reakcja na kliknięcie',
+		description: 'ile strona zwleka z odpowiedzią',
+		unit: 'ms',
+		good: 200,
+		poor: 500,
+		max: 120_000
+	},
+	CLS: {
+		label: 'Skakanie treści',
+		description: 'czy tekst ucieka spod palca',
+		unit: '',
+		good: 0.1,
+		poor: 0.25,
+		max: 10
+	},
+	FCP: {
+		label: 'Pierwsza treść',
+		description: 'kiedy widać cokolwiek',
+		unit: 'ms',
+		good: 1800,
+		poor: 3000,
+		max: 120_000
+	},
+	TTFB: {
+		label: 'Pierwszy bajt',
+		description: 'zanim przeglądarka dostanie odpowiedź',
+		unit: 'ms',
+		good: 800,
+		poor: 1800,
+		max: 120_000
+	}
+} as const;
+
+export type VitalName = keyof typeof VITALS;
+
+/** Nazwy wskaźników w kolejności, w jakiej pokazuje je panel. */
+export const VITAL_NAMES = Object.keys(VITALS) as VitalName[];
+
+/** Czy nazwa ze zgłoszenia jest wskaźnikiem, który przyjmujemy. */
+export function isVitalName(value: string | null | undefined): value is VitalName {
+	return !!value && Object.prototype.hasOwnProperty.call(VITALS, value);
+}
+
+/** Ocena wartości wskaźnika. Nazwy odpowiadają zmiennym `--vital-*` w app.css. */
+export type VitalRating = 'good' | 'mid' | 'poor';
+
+export function vitalRating(name: VitalName, value: number): VitalRating {
+	const spec = VITALS[name];
+	if (value <= spec.good) return 'good';
+	return value > spec.poor ? 'poor' : 'mid';
+}
+
+/**
+ * Ile zgłoszeń wystarczy, żeby percentyl coś znaczył.
+ *
+ * 75. percentyl z trzech odsłon to najgorsza z trzech, a nie percentyl.
+ * Poniżej tego progu panel pokazuje liczbę, ale zaznacza ją jako niepewną.
+ */
+export const VITAL_MIN_SAMPLES = 20;
