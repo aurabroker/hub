@@ -4,10 +4,12 @@ import {
 	PANEL_TIMEZONE,
 	PROBE_PATH_PATTERNS,
 	RANGES,
+	isVitalName,
 	trafficChannel,
 	type Channel,
 	type RangeKey,
-	type TopRow
+	type TopRow,
+	type VitalName
 } from '$lib/analytics';
 
 /**
@@ -54,6 +56,12 @@ export type HeatCell = { day: number; hour: number; value: number };
 
 /** Adres, który odpowiedział błędem — kandydat na zepsuty link. */
 export type BrokenRow = { path: string; status: string; value: number };
+
+/** Jeden wskaźnik Core Web Vitals: percentyl i liczba zgłoszeń, z których powstał. */
+export type VitalSummary = { name: VitalName; p75: number; samples: number };
+
+/** Strona w zestawieniu wskaźnika — po to, żeby wiedzieć, którą naprawiać. */
+export type VitalPathRow = { path: string; p75: number; samples: number };
 
 export class AnalyticsConfigError extends Error {}
 
@@ -426,5 +434,59 @@ export async function loadBrokenPaths(win: Window, host: string | null): Promise
 		path: String(r.sciezka ?? ''),
 		status: String(r.kod ?? ''),
 		value: num(r.n)
+	}));
+}
+
+// --- Core Web Vitals -------------------------------------------------------
+
+/**
+ * Wskaźniki z przeglądarki, po jednym wierszu na wskaźnik.
+ *
+ * Liczymy 75. percentyl, bo tak definiuje się Core Web Vitals: średnia ukryłaby
+ * ogon, a to właśnie ogon oznacza ludzi, którzy zamykają stronę. Percentyl musi
+ * być ważony `_sample_interval` — inaczej przy próbkowaniu jedno zdarzenie
+ * waży tyle samo co tysiąc.
+ *
+ * Boty odsiewamy: automat nie ma oczu, a jego czas ładowania nie jest niczyim
+ * doświadczeniem. W praktyce i tak rzadko wykonują JavaScript.
+ */
+export async function loadVitals(win: Window, host: string | null): Promise<VitalSummary[]> {
+	const rows = await runQuery(
+		`SELECT blob9                                                 AS metryka,
+             quantileExactWeighted(0.75)(double1, _sample_interval) AS p75,
+             SUM(_sample_interval)                                  AS probek
+       FROM ${DATASET} WHERE ${where(win, host, 'vital')}${WITHOUT_BOTS}
+       GROUP BY metryka`
+	);
+
+	return rows
+		.map((r) => ({ name: String(r.metryka ?? ''), p75: num(r.p75), samples: num(r.probek) }))
+		.filter((r): r is VitalSummary => isVitalName(r.name));
+}
+
+/**
+ * Strony o najgorszym wyniku wybranego wskaźnika.
+ *
+ * Sam percentyl dla serwisu mówi, że jest źle; ta tabela mówi, gdzie. Bez niej
+ * poprawianie wydajności zaczyna się od zgadywania, która podstrona ciągnie
+ * wynik w dół.
+ */
+export async function loadVitalPaths(
+	win: Window,
+	host: string | null,
+	metric: VitalName
+): Promise<VitalPathRow[]> {
+	const rows = await runQuery(
+		`SELECT blob2                                                 AS sciezka,
+             quantileExactWeighted(0.75)(double1, _sample_interval) AS p75,
+             SUM(_sample_interval)                                  AS probek
+       FROM ${DATASET} WHERE ${where(win, host, 'vital')}${WITHOUT_BOTS}
+         AND blob9 = '${metric}'${WITHOUT_PROBES}
+       GROUP BY sciezka ORDER BY p75 DESC LIMIT ${TOP_LIMIT}`
+	);
+	return rows.map((r) => ({
+		path: String(r.sciezka ?? ''),
+		p75: num(r.p75),
+		samples: num(r.probek)
 	}));
 }

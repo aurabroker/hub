@@ -14,8 +14,8 @@ i wymusza baner zgody. Pomiar po stronie serwera nie ma tych wad.
 
 ```
 przeglądarka → Cloudflare → [collector Worker] → origin
-                                   ↓ (waitUntil)
-                            Analytics Engine
+     ↑ /__vitals.js               ↓ (waitUntil)
+     ↓ /__vitals            Analytics Engine
                                    ↓
                       HUB /analityka (SvelteKit) ← SQL API
                                    ↓
@@ -118,6 +118,60 @@ Parametry `utm_*` są wyłącznie w pierwszym żądaniu. Bez ciasteczka nie
 przeniesiemy ich na kolejne podstrony, więc mierzymy **strony wejścia
 z kampanii**, a nie całą ścieżkę odwiedzającego.
 
+## Core Web Vitals
+
+Jedyny element analityki działający po stronie użytkownika. Powód jest twardy:
+czas do największego elementu, skakanie treści i opóźnienie reakcji na
+kliknięcie istnieją wyłącznie w przeglądarce. Serwer ich nie widzi, choćby
+odpowiadał w 5 ms — i dokładnie tak wygląda dziś `rozwod.waw.pl`.
+
+| Element | Gdzie |
+|---|---|
+| Skrypt mierzący | `workers/analytics-collector/vitals-client.ts`, serwowany pod `/__vitals.js` |
+| Endpoint zgłoszeń | `POST /__vitals`, obsługiwany przez collectora, bez dotykania originu |
+| Progi i nazwy wskaźników | stała `VITALS` w `src/lib/analytics.ts`, wspólna z panelem |
+| Zapis | `blob3 = 'vital'`, nazwa wskaźnika w `blob9`, wartość w `double1` |
+
+Mierzymy pięć wskaźników: `LCP`, `INP`, `CLS`, `FCP`, `TTFB`. Zgłoszenie idzie
+raz na odsłonę, przez `navigator.sendBeacon` w momencie zniknięcia karty.
+
+### Skrypt trafia na strony sam
+
+Collector dokłada `<script src="/__vitals.js" defer>` przed `</head>` każdej
+odpowiedzi HTML na mierzonym hoście, przez `HTMLRewriter`. To **jedyne**
+miejsce, w którym Worker zmienia odpowiedź originu — wcześniej wracała
+nietknięta. Alternatywą było dopisanie znacznika ręcznie w ośmiu serwisach
+i pilnowanie, żeby nie wypadł przy kolejnym przebudowaniu któregoś z nich.
+
+Skrypt jest z tej samej domeny, więc polityka `script-src 'self'` go przepuszcza.
+Serwis z CSP wymagającą `nonce` zablokuje skrypt — zniknie wtedy pomiar
+wskaźników na tym serwisie, ale nie strona.
+
+### Obrona publicznego endpointu
+
+`/__vitals` jest wejściem publicznym, więc sprawdzamy po kolei: metodę (tylko
+POST), nagłówek `Origin` (musi być `https://` na tym samym mierzonym hoście —
+`sendBeacon` z obcej domeny i tak wyśle żądanie, tylko odpowiedzi nie
+przeczyta), rozmiar ciała (2 kB), liczbę wskaźników w zgłoszeniu, nazwy
+z zamkniętej listy i zakresy wartości (`VITALS[…].max`).
+
+Limit częstotliwości to licznik w pamięci izolatu: 30 zgłoszeń na minutę na
+skrót odwiedzającego. Izolatów jest wiele i każdy liczy osobno, więc realny
+limit jest wielokrotnością tej liczby. **To zapora na przypadkową pętlę
+i pojedynczego amatora, nie na rozproszony zalew** — na tamto jest Rate
+Limiting w panelu Cloudflare.
+
+### Dwa świadome przybliżenia
+
+1. **INP liczymy jako najdłuższą interakcję**, a nie wysoki percentyl
+   wszystkich. Przy stronach ofertowych z kilkoma kliknięciami na odsłonę obie
+   liczby są tą samą liczbą; przy dziesiątkach interakcji nasza jest
+   pesymistyczna, czyli myli się w bezpieczną stronę.
+2. **Progi oceny zmieniają się.** Google wymienił FID na INP w 2024. Wartości
+   w `VITALS` mają datę wpisania i nie były zweryfikowane w źródle przy
+   ostatniej edycji — przed decyzją opartą na kolorze kafelka sprawdź je na
+   web.dev.
+
 ## Co pokazuje panel
 
 Układ jest ułożony wg tego, jak często się w coś patrzy, a nie wg tego, co
@@ -131,6 +185,7 @@ Układ jest ułożony wg tego, jak często się w coś patrzy, a nie wg tego, co
 | Kanały ruchu | Skąd przychodzą: wyszukiwarki, social, asystenci AI, kampanie, polecenia, wejścia bezpośrednie |
 | Serwisy | Który z ośmiu serwisów żyje (tylko przy filtrze „wszystkie") |
 | Kiedy Cię czytają | Mapa dzień tygodnia × godzina — kiedy publikować i wysyłać |
+| Szybkość w przeglądarce | Core Web Vitals i podstrony, które ciągną wynik w dół |
 | Ruch z kampanii | Wejścia z parametrami `utm_*` |
 | Adresy z błędem | Zepsute linki na własnych stronach, bez skanerów |
 
@@ -264,7 +319,7 @@ odpowiedzi. Decyzję podjął człowiek, nie agent.
 | trasy na mierzonych hostach | **do zrobienia ręcznie** | | 14 wpisów w panelu; token konta nie ma uprawnienia Workers Routes |
 | przestrzeń KV `VISITOR_SALT` | utworzona | 2026-09-07 | `e3d7ef83448e4a5288b3cddedd31af6e` |
 | panel `/analityka` w HUB | kod gotowy | 2026-09-07 | wymaga `CF_ACCOUNT_ID` i `ANALYTICS_TOKEN` w Pages |
-| Web Vitals | do zrobienia | | sesja 3 |
+| Web Vitals | kod gotowy | 2026-09-10 | wymaga `wrangler deploy` collectora |
 | archiwum D1 | do zrobienia | | sesja 3 |
 
 ## Dane konta
@@ -336,7 +391,8 @@ Nawigacja w aplikacji jednostronicowej wymaga jawnego zgłoszenia zdarzenia
 z kodu frontu.
 
 Core Web Vitals też są mierzone wyłącznie w przeglądarce, stąd osobny
-skrypt kliencki. To jedyny element działający po stronie użytkownika.
+skrypt kliencki (`/__vitals.js`, patrz „Core Web Vitals"). To jedyny element
+działający po stronie użytkownika.
 
 Wykrywanie botów opiera się u nas na wzorcach User-Agenta, bo
 `request.cf.botManagement` wymaga płatnego Bot Management, a nasze strefy są

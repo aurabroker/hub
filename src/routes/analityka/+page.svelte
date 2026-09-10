@@ -1,6 +1,15 @@
 <script lang="ts">
 	import AreaChart from '$lib/components/AreaChart.svelte';
-	import { RANGES, WEEKDAYS, type RangeKey, type TopRow } from '$lib/analytics';
+	import {
+		RANGES,
+		VITALS,
+		VITAL_MIN_SAMPLES,
+		VITAL_NAMES,
+		WEEKDAYS,
+		vitalRating,
+		type RangeKey,
+		type TopRow
+	} from '$lib/analytics';
 	import type { PageServerData } from './$types';
 
 	let { data }: { data: PageServerData } = $props();
@@ -132,6 +141,41 @@
 	}
 
 	const HOURS = Array.from({ length: 24 }, (_, h) => h);
+
+	// --- Core Web Vitals -----------------------------------------------------
+
+	/**
+	 * Wskaźnik w postaci gotowej do pokazania: wartość z jednostką, ocena
+	 * i informacja, czy zgłoszeń było dość, żeby percentyl coś znaczył.
+	 * Wskaźniki bez ani jednego zgłoszenia pomijamy — pusty kafelek z kreską
+	 * mówi mniej niż jego brak.
+	 */
+	let vitals = $derived(
+		VITAL_NAMES.map((name) => {
+			const spec = VITALS[name];
+			const row = data.vitals.find((v) => v.name === name);
+			if (!row) return null;
+			return {
+				name,
+				label: spec.label,
+				description: spec.description,
+				text: spec.unit === 'ms' ? `${nf.format(Math.round(row.p75))} ms` : row.p75.toFixed(2).replace('.', ','),
+				rating: vitalRating(name, row.p75),
+				samples: row.samples,
+				thin: row.samples < VITAL_MIN_SAMPLES,
+				// Skala paska: próg „złe" to koniec paska, więc wynik dobry
+				// zajmuje mniej niż połowę i widać to bez czytania liczby.
+				bar: Math.min(1, row.p75 / spec.poor)
+			};
+		}).filter((v) => v !== null)
+	);
+
+	const RATING_LABEL = { good: 'dobrze', mid: 'wymaga poprawy', poor: 'źle' } as const;
+
+	/** Etykieta osi dla tabeli „gdzie boli": ta sama jednostka co w kafelku. */
+	function lcpText(value: number): string {
+		return `${nf.format(Math.round(value))} ms`;
+	}
 
 	/** Zwijane tabele techniczne: kraje, urządzenia, przeglądarki, źródła. */
 	let details: { title: string; head: string; rows: TopRow[] }[] = $derived([
@@ -334,6 +378,61 @@
 	</div>
 </div>
 
+<div class="card">
+	<div class="card-head">
+		<h3>Szybkość w przeglądarce</h3>
+		<span class="faint">Core Web Vitals, 75. percentyl</span>
+	</div>
+
+	{#if vitals.length === 0}
+		<p class="muted small">
+			Brak zgłoszeń z przeglądarek w tym okresie. Wskaźniki zbiera skrypt
+			<span class="mono">/__vitals.js</span>, który collector dokłada do stron HTML na mierzonych
+			hostach — jeśli tu pusto, sprawdź, czy Worker ma trasę na tym serwisie i czy polityka CSP
+			serwisu nie blokuje skryptu z własnej domeny.
+		</p>
+	{:else}
+		<div class="vitals">
+			{#each vitals as v (v.name)}
+				<div class="vital" style="--tone: var(--vital-{v.rating})">
+					<div class="v-head">
+						<span class="v-name mono">{v.name}</span>
+						<span class="v-rating">{RATING_LABEL[v.rating]}</span>
+					</div>
+					<div class="v-value">
+						{v.text}
+						{#if v.thin}<span class="v-thin" title="Za mało zgłoszeń, żeby percentyl był pewny">?</span>{/if}
+					</div>
+					<div class="v-track"><span class="v-bar" style="width: {v.bar * 100}%"></span></div>
+					<div class="v-label">{v.label}</div>
+					<div class="v-desc faint">{v.description}</div>
+					<div class="v-desc faint">{nf.format(v.samples)} zgłoszeń</div>
+				</div>
+			{/each}
+		</div>
+
+		{#if data.vitalPaths.length > 0}
+			<h4 class="v-sub">Gdzie boli najbardziej (LCP)</h4>
+			<table class="tbl compact">
+				<thead>
+					<tr><th>Adres</th><th class="num">LCP</th><th class="num">Zgłoszeń</th></tr>
+				</thead>
+				<tbody>
+					{#each data.vitalPaths as row (row.path)}
+						<tr>
+							<td class="mono">{row.path}</td>
+							<td class="num" style="color: var(--vital-{vitalRating('LCP', row.p75)})">
+								{lcpText(row.p75)}
+							</td>
+							<td class="num">{nf.format(row.samples)}</td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+		{/if}
+	{/if}
+</div>
+
 <details class="card details">
 	<summary>Szczegóły techniczne: kraje, urządzenia, przeglądarki, adresy odsyłające</summary>
 	<div class="grid2" style="margin-top: var(--space-4)">
@@ -363,9 +462,12 @@
 	<summary>Core Web Vitals i jak czytać te liczby</summary>
 	<div class="small" style="margin-top: var(--space-3)">
 		<p>
-			<strong>Core Web Vitals.</strong> Szybkość ładowania da się zmierzyć wyłącznie w przeglądarce,
-			więc wymaga osobnego skryptu po stronie klienta. Miejsce jest przygotowane, dane pojawią się po
-			wdrożeniu endpointu <span class="mono">/__vitals</span>.
+			<strong>Core Web Vitals.</strong> Mierzy je skrypt w przeglądarce — serwer tych liczb nie widzi,
+			choćby odpowiadał w kilka milisekund. Zgłoszenie idzie raz na odsłonę, w momencie zniknięcia
+			karty, bez ciasteczek i bez query stringu. <span class="mono">INP</span> jest u nas
+			przybliżony najdłuższą interakcją zamiast wysokim percentylem wszystkich, więc przy stronach
+			z dziesiątkami kliknięć bywa pesymistyczny. Progi oceny pochodzą z Core Web Vitals i
+			<strong>zmieniają się</strong> — przed decyzją opartą na kolorze sprawdź je w źródle.
 		</p>
 		<p>
 			<strong>Automaty.</strong> Rozpoznajemy je po wzorcach adresu i User-Agenta, bo Bot Management
@@ -592,6 +694,73 @@
 		min-height: 10px;
 		outline: 1px solid var(--color-border);
 		outline-offset: -1px;
+	}
+
+	/* Wskaźniki: siatka kafelków, każdy w kolorze swojej oceny. Kolor jest tu
+	   jedynym szybkim sygnałem, więc obok niego zawsze stoi słowo — sam kolor
+	   nie wystarcza komuś, kto go nie rozróżnia. */
+	.vitals {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+		gap: var(--space-3);
+	}
+	.vital {
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		padding: var(--space-3);
+		background: color-mix(in srgb, var(--tone) 6%, transparent);
+	}
+	.v-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: var(--space-2);
+	}
+	.v-name {
+		font-size: var(--text-xs);
+		font-weight: 600;
+		color: var(--color-text-muted);
+	}
+	.v-rating {
+		font-size: 0.65rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--tone);
+		font-weight: 600;
+	}
+	.v-value {
+		font-size: 1.4rem;
+		font-weight: 600;
+		line-height: 1.3;
+		color: var(--tone);
+		font-variant-numeric: tabular-nums;
+	}
+	.v-thin {
+		font-size: var(--text-xs);
+		color: var(--color-text-faint);
+		cursor: help;
+	}
+	.v-track {
+		height: 4px;
+		border-radius: 999px;
+		background: var(--color-border);
+		overflow: hidden;
+		margin: var(--space-2) 0;
+	}
+	.v-bar {
+		display: block;
+		height: 100%;
+		background: var(--tone);
+	}
+	.v-label {
+		font-size: var(--text-sm);
+	}
+	.v-desc {
+		font-size: var(--text-xs);
+	}
+	.v-sub {
+		margin: var(--space-5) 0 var(--space-2);
+		font-size: var(--text-sm);
 	}
 
 	.details summary {

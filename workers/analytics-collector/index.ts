@@ -16,8 +16,11 @@
 // identyczny wynik, a trzecia niezależna implementacja to trzecia okazja do
 // rozjechania się. `src/lib/utm.ts` nie ma importów, więc wchodzi do bundla czysto.
 import { slugifyUtm, UTM_KEYS } from '../../src/lib/utm';
-// Lista mierzonych hostów jest wspólna z panelem — jedna definicja, zero drifty.
-import { MEASURED_HOSTS } from '../../src/lib/analytics';
+// Lista mierzonych hostów oraz definicje Core Web Vitals są wspólne z panelem —
+// jedna definicja, zero drifty. Collector bierze stąd dozwolone nazwy
+// wskaźników i górne granice wartości, panel te same progi do oceny.
+import { MEASURED_HOSTS, VITALS, isVitalName, type VitalName } from '../../src/lib/analytics';
+import { VITALS_SCRIPT } from './vitals-client';
 
 /**
  * Mapowanie pól Analytics Engine.
@@ -282,7 +285,55 @@ function shouldMeasure(request: Request, url: URL, host: string): boolean {
 	return true;
 }
 
-/** Zapis jednego zdarzenia. Kolejność pól musi odpowiadać stałej FIELDS. */
+/** Puste wartości utm_* dla zdarzeń, które nie pochodzą ze strony wejścia. */
+const NO_UTM = ['', '', '', '', ''];
+
+/**
+ * Zapis jednego zdarzenia. Kolejność blobów musi odpowiadać stałej FIELDS —
+ * SQL API zwraca kolumny bez nazw, więc pomyłka tutaj po cichu przestawia
+ * wszystkie zapytania panelu. Dlatego zapis jest w jednym miejscu, wspólnym
+ * dla odsłon i wskaźników z przeglądarki.
+ */
+function writeEvent(
+	env: Env,
+	event: {
+		host: string;
+		path: string;
+		type: string;
+		country: string;
+		referrer: string;
+		device: string;
+		browser: string;
+		visitor: string;
+		detail: string;
+		utm: string[];
+		value: number;
+	}
+): void {
+	env.WEB_EVENTS.writeDataPoint({
+		indexes: [event.host],
+		blobs: [
+			event.host,
+			event.path,
+			event.type,
+			event.country,
+			event.referrer,
+			event.device,
+			event.browser,
+			event.visitor,
+			event.detail,
+			...event.utm
+		],
+		doubles: [event.value]
+	});
+}
+
+/** Kraj z Cloudflare. Puste, gdy nie ma go w żądaniu (np. wywołanie lokalne). */
+function country(request: Request): string {
+	return (request as { cf?: { country?: string } }).cf?.country ?? '';
+}
+
+/** Zapis odsłony. */
 async function writePageview(
 	request: Request,
 	env: Env,
@@ -294,28 +345,207 @@ async function writePageview(
 	const ua = request.headers.get('user-agent') ?? '';
 	const bot = isBot(request.cf, ua, url.pathname);
 
-	env.WEB_EVENTS.writeDataPoint({
-		indexes: [host],
-		blobs: [
-			host,
-			normalizePath(url.pathname),
-			'pageview',
-			((request as { cf?: { country?: string } }).cf?.country) ?? '',
-			referrerHost(request.headers.get('referer'), host),
-			deviceClass(ua, bot),
-			browserFamily(ua),
-			await visitorHash(request, env, host),
-			String(status),
-			...utmValues(url)
-		],
-		doubles: [durationMs]
+	writeEvent(env, {
+		host,
+		path: normalizePath(url.pathname),
+		type: 'pageview',
+		country: country(request),
+		referrer: referrerHost(request.headers.get('referer'), host),
+		device: deviceClass(ua, bot),
+		browser: browserFamily(ua),
+		visitor: await visitorHash(request, env, host),
+		detail: String(status),
+		utm: utmValues(url),
+		value: durationMs
 	});
+}
+
+// --- Core Web Vitals -------------------------------------------------------
+
+/** Adres, pod którym przeglądarka zgłasza wskaźniki. */
+const VITALS_PATH = '/__vitals';
+
+/** Adres skryptu mierzącego. Ta sama domena co strona — CSP `script-src 'self'` przepuszcza. */
+const VITALS_SCRIPT_PATH = '/__vitals.js';
+
+/** Górna granica zgłoszenia. Pięć wskaźników mieści się w ~150 bajtach. */
+const MAX_VITALS_BODY = 2048;
+
+/** Ile wskaźników przyjmujemy z jednego zgłoszenia. Wskaźników jest pięć. */
+const MAX_VITALS_PER_REQUEST = 8;
+
+/**
+ * Prosty licznik częstotliwości, trzymany w pamięci izolatu.
+ *
+ * Endpoint jest publiczny, więc bez tego jeden skrypt w pętli dopisałby do
+ * datasetu tyle wierszy, ile zdąży. Ograniczenie jest świadomie płytkie:
+ * izolatów Workera jest wiele i każdy liczy osobno, więc realny limit jest
+ * wielokrotnością tego poniżej. To zapora na przypadkową pętlę i pojedynczego
+ * amatora, nie na rozproszony zalew — na tamto jest Rate Limiting w panelu
+ * Cloudflare, jeśli kiedyś będzie potrzebny.
+ */
+const RATE_WINDOW_MS = 60_000;
+const RATE_LIMIT = 30;
+const RATE_MAX_KEYS = 5000;
+const rateCounters = new Map<string, { windowStart: number; count: number }>();
+
+function overRateLimit(key: string): boolean {
+	const now = Date.now();
+	// Mapa nie ma szansy rosnąć w nieskończoność: po przekroczeniu rozmiaru
+	// czyścimy ją w całości. Gubi to bieżące okna, co przy minutowym oknie
+	// kosztuje najwyżej jedną minutę pobłażliwości.
+	if (rateCounters.size > RATE_MAX_KEYS) rateCounters.clear();
+
+	const entry = rateCounters.get(key);
+	if (!entry || now - entry.windowStart > RATE_WINDOW_MS) {
+		rateCounters.set(key, { windowStart: now, count: 1 });
+		return false;
+	}
+	entry.count += 1;
+	return entry.count > RATE_LIMIT;
+}
+
+/** Odpowiedź bez treści. Przeglądarka i tak jej nie czyta — sendBeacon jest ślepy. */
+function noContent(status = 204): Response {
+	return new Response(null, { status, headers: { 'cache-control': 'no-store' } });
+}
+
+/**
+ * Czy zgłoszenie przyszło z mierzonej strony.
+ *
+ * Endpoint świadomie nie ma nagłówków CORS, ale samo ich pominięcie nie
+ * wystarcza: `sendBeacon` z obcej domeny i tak wyśle żądanie, tylko odpowiedzi
+ * nie przeczyta. Origin jest przy metodzie POST wysyłany zawsze, więc jego brak
+ * albo obca wartość to powód do odrzucenia.
+ */
+function sameSiteOrigin(request: Request, host: string): boolean {
+	const origin = request.headers.get('origin');
+	if (!origin) return false;
+	try {
+		const url = new URL(origin);
+		return url.protocol === 'https:' && normalizeHost(url.hostname) === host;
+	} catch {
+		return false;
+	}
+}
+
+/** Wartości spoza zakresu to błąd skryptu albo próba zaśmiecenia danych. */
+function validVitalValue(name: VitalName, value: unknown): value is number {
+	return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= VITALS[name].max;
+}
+
+/**
+ * Zgłoszenie Core Web Vitals z przeglądarki.
+ *
+ * Wejście publiczne, więc każde pole jest sprawdzane: metoda, Origin, rozmiar
+ * ciała, liczba wskaźników, nazwy z zamkniętej listy i zakresy wartości.
+ * Ścieżkę bierzemy ze zgłoszenia (przeglądarka wie, na której podstronie była),
+ * ale normalizujemy ją tą samą funkcją co odsłony i nie przyjmujemy niczego,
+ * co nie zaczyna się od ukośnika — query stringu tam z definicji nie ma.
+ */
+async function handleVitals(request: Request, env: Env, host: string): Promise<Response> {
+	if (request.method !== 'POST') return noContent(405);
+	if (!sameSiteOrigin(request, host)) return noContent(403);
+
+	const declared = Number(request.headers.get('content-length') ?? 0);
+	if (declared > MAX_VITALS_BODY) return noContent(413);
+
+	const raw = await request.text();
+	if (raw.length > MAX_VITALS_BODY) return noContent(413);
+
+	let body: { p?: unknown; m?: unknown };
+	try {
+		body = JSON.parse(raw);
+	} catch {
+		return noContent(400);
+	}
+
+	const path = typeof body.p === 'string' && body.p.startsWith('/') ? body.p.split('?')[0] : null;
+	if (!path || !Array.isArray(body.m) || body.m.length === 0) return noContent(400);
+
+	const ua = request.headers.get('user-agent') ?? '';
+	const bot = isBot(request.cf, ua, path);
+	const visitor = await visitorHash(request, env, host);
+
+	// Klucz limitu: skrót odwiedzającego, a przy jego braku sam adres IP —
+	// który i tak nigdzie nie jest zapisywany, tylko trzymany w pamięci.
+	if (overRateLimit(visitor || (request.headers.get('cf-connecting-ip') ?? 'brak'))) {
+		return noContent(429);
+	}
+
+	const shared = {
+		host,
+		path: normalizePath(path),
+		type: 'vital',
+		country: country(request),
+		referrer: '',
+		device: deviceClass(ua, bot),
+		browser: browserFamily(ua),
+		visitor,
+		utm: NO_UTM
+	};
+
+	for (const item of body.m.slice(0, MAX_VITALS_PER_REQUEST)) {
+		if (!Array.isArray(item) || item.length !== 2) continue;
+		const [name, value] = item as [unknown, unknown];
+		if (typeof name !== 'string' || !isVitalName(name)) continue;
+		if (!validVitalValue(name, value)) continue;
+		writeEvent(env, { ...shared, detail: name, value });
+	}
+
+	return noContent();
+}
+
+/** Skrypt mierzący, serwowany z tej samej domeny co strona. */
+function vitalsScript(): Response {
+	return new Response(VITALS_SCRIPT, {
+		headers: {
+			'content-type': 'application/javascript; charset=utf-8',
+			// Godzina: zmiana skryptu rozchodzi się po świecie w rozsądnym czasie,
+			// a przeglądarka nie pobiera go przy każdej odsłonie.
+			'cache-control': 'public, max-age=3600',
+			'x-content-type-options': 'nosniff'
+		}
+	});
+}
+
+/**
+ * Doklejenie znacznika skryptu do strony HTML.
+ *
+ * To jedyne miejsce, w którym Worker zmienia odpowiedź originu, i kosztuje
+ * dokładnie jeden element `<script defer>` przed `</head>`. Alternatywą było
+ * dopisanie tego znacznika ręcznie w ośmiu serwisach i pilnowanie, żeby nie
+ * wypadł przy kolejnym przebudowaniu któregoś z nich.
+ *
+ * `HTMLRewriter` pracuje strumieniowo, więc nie buforuje strony w pamięci
+ * i nie opóźnia pierwszego bajtu. Jeśli serwis ma politykę CSP wymagającą
+ * nonce, skrypt zostanie zablokowany — zniknie wtedy pomiar wskaźników, ale
+ * nie strona.
+ */
+function injectVitalsScript(response: Response): Response {
+	const type = response.headers.get('content-type') ?? '';
+	if (response.status !== 200 || !type.includes('text/html')) return response;
+
+	return new HTMLRewriter()
+		.on('head', {
+			element(element) {
+				element.append(`<script src="${VITALS_SCRIPT_PATH}" defer></script>`, { html: true });
+			}
+		})
+		.transform(response);
 }
 
 export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const url = new URL(request.url);
 		const host = normalizeHost(url.hostname);
+
+		// Trasy analityki obsługujemy sami, bez ruszania originu. Tylko na
+		// mierzonych hostach — na pozostałych `/__vitals` to zwykły adres strony.
+		if (MEASURED.has(host)) {
+			if (url.pathname === VITALS_PATH) return handleVitals(request, env, host);
+			if (url.pathname === VITALS_SCRIPT_PATH) return vitalsScript();
+		}
 
 		const started = Date.now();
 		const response = await fetch(request);
@@ -335,9 +565,12 @@ export default {
 					}
 				})()
 			);
+
+			// Strona HTML dostaje znacznik skryptu Web Vitals. Poza tym jednym
+			// dopiskiem odpowiedź originu wraca nietknięta.
+			return injectVitalsScript(response);
 		}
 
-		// Odpowiedź originu wraca nietknięta — Worker niczego w niej nie zmienia.
 		return response;
 	}
 };
