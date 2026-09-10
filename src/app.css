@@ -18,6 +18,28 @@
 	--c-zdrowie: #0d9488;
 	--c-konsultacja: #64748b;
 
+	/* Kolor akcentu: to, co można kliknąć albo co jest aktywne. Granat
+	   `--color-primary` zostaje kolorem tekstu i tła, nie sygnałem. */
+	--color-accent: #2563eb;
+	--color-accent-hover: #1d4ed8;
+
+	/* Paleta danych. Sześć odcieni o różnym odcieniu i jasności, żeby wykres
+	   dało się odczytać także w druku na szaro i przy najczęstszej wadzie
+	   widzenia barw (deuteranopia) — dlatego niebieski sąsiaduje z bursztynem,
+	   a nie z zielenią. Kolejność jest kolejnością użycia. */
+	--data-1: #2563eb;
+	--data-2: #0d9488;
+	--data-3: #7c3aed;
+	--data-4: #d97706;
+	--data-5: #db2777;
+	--data-6: #059669;
+
+	/* Ocena Core Web Vitals: trzy progi, trzy kolory. Te same nazwy, których
+	   używa `vitalRating()` w src/lib/analytics.ts. */
+	--vital-good: #10b981;
+	--vital-mid: #f59e0b;
+	--vital-poor: #ef4444;
+
 	--radius-sm: 0.375rem;
 	--radius-md: 0.5rem;
 	--radius-lg: 0.75rem;
@@ -45,6 +67,20 @@
 	--color-text: #f8fafc;
 	--color-text-muted: #94a3b8;
 	--color-text-faint: #64748b;
+
+	/* Na ciemnym tle te same barwy są za ciemne i gasną — bierzemy jaśniejsze
+	   warianty tej samej rodziny, żeby kontrast do tła został podobny. */
+	--color-accent: #60a5fa;
+	--color-accent-hover: #93c5fd;
+	--data-1: #60a5fa;
+	--data-2: #2dd4bf;
+	--data-3: #a78bfa;
+	--data-4: #fbbf24;
+	--data-5: #f472b6;
+	--data-6: #34d399;
+	--vital-good: #34d399;
+	--vital-mid: #fbbf24;
+	--vital-poor: #f87171;
 }
 
 :root[data-theme='dark'] .badge-success {
@@ -178,7 +214,7 @@ a {
 }
 
 .nav-item.active {
-	background: var(--color-primary);
+	background: var(--color-accent);
 	color: var(--color-surface);
 }
 
@@ -216,11 +252,43 @@ a {
 	margin-bottom: var(--space-8);
 }
 
+/* Kafelki liczb na dashboardzie. Kolejne dostają kolejne barwy z palety, żeby
+   rząd kafelków dało się objąć wzrokiem — kolor rozdziela, nie ozdabia. */
 .kpi-card {
+	position: relative;
 	background: var(--color-surface);
 	border: 1px solid var(--color-border);
 	border-radius: var(--radius-lg);
 	padding: var(--space-5);
+	overflow: hidden;
+}
+
+.kpi-card::before {
+	content: '';
+	position: absolute;
+	inset: 0 0 auto 0;
+	height: 3px;
+	background: var(--data-1);
+}
+
+.kpi-card:nth-child(2)::before {
+	background: var(--data-2);
+}
+
+.kpi-card:nth-child(3)::before {
+	background: var(--data-3);
+}
+
+.kpi-card:nth-child(4)::before {
+	background: var(--data-4);
+}
+
+.kpi-card:nth-child(5)::before {
+	background: var(--data-5);
+}
+
+.kpi-card:nth-child(6)::before {
+	background: var(--data-6);
 }
 
 .kpi-label {
@@ -451,7 +519,8 @@ a {
 .form-select:focus,
 .form-textarea:focus {
 	outline: none;
-	border-color: var(--color-primary);
+	border-color: var(--color-accent);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent);
 }
 
 .card {

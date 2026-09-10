@@ -46,37 +46,59 @@
 			: '—'
 	);
 
-	/** Kafelki. `higherIsBetter` decyduje, czy strzałka w górę jest zielona czy czerwona. */
+	/**
+	 * Kafelki. `higherIsBetter` decyduje, czy strzałka w górę jest zielona czy
+	 * czerwona; `tone` to kolor z palety danych, po którym kafelek się rozpoznaje
+	 * kątem oka — kolor jest tu etykietą, nie ozdobą, więc każdy ma inny.
+	 */
 	let tiles = $derived([
 		{
 			label: 'Odwiedzający',
 			value: nf.format(data.totals.visitors),
 			hint: 'bez botów',
 			d: delta(data.totals.visitors, data.previousTotals.visitors),
-			higherIsBetter: true
+			higherIsBetter: true,
+			tone: 'var(--data-1)'
 		},
 		{
 			label: 'Odsłony',
 			value: nf.format(data.totals.pageviews),
 			hint: `${perVisitor} na osobę`,
 			d: delta(data.totals.pageviews, data.previousTotals.pageviews),
-			higherIsBetter: true
+			higherIsBetter: true,
+			tone: 'var(--data-2)'
 		},
 		{
 			label: 'Czas odpowiedzi',
 			value: `${nf.format(data.totals.p75ResponseMs)} ms`,
 			hint: `75. percentyl, średnia ${nf.format(data.totals.avgResponseMs)} ms`,
 			d: delta(data.totals.p75ResponseMs, data.previousTotals.p75ResponseMs),
-			higherIsBetter: false
+			higherIsBetter: false,
+			tone: 'var(--data-3)'
 		},
 		{
 			label: 'Automaty',
 			value: pct(data.totals.botShare),
 			hint: `błędy ${pct(data.totals.errorShare)}`,
 			d: delta(data.totals.botShare, data.previousTotals.botShare),
-			higherIsBetter: false
+			higherIsBetter: false,
+			tone: 'var(--data-4)'
 		}
 	]);
+
+	/**
+	 * Kolor kanału ruchu. Kanałów jest sześć i są stałym słownikiem, więc każdy
+	 * dostaje własną barwę na stałe — ta sama kategoria ma mieć ten sam kolor
+	 * przy każdym wejściu na stronę, inaczej kolor niczego nie znaczy.
+	 */
+	const CHANNEL_TONE: Record<string, string> = {
+		'Asystenci AI': 'var(--data-3)',
+		Wyszukiwarki: 'var(--data-1)',
+		'Media społecznościowe': 'var(--data-5)',
+		Kampanie: 'var(--data-4)',
+		Polecenia: 'var(--data-2)',
+		'Wejścia bezpośrednie': 'var(--color-text-faint)'
+	};
 
 	let refreshed = $derived(
 		new Date(data.refreshedAt).toLocaleString('pl-PL', {
@@ -149,7 +171,7 @@
 
 <div class="tiles">
 	{#each tiles as t (t.label)}
-		<div class="tile">
+		<div class="tile" style="--tone: {t.tone}">
 			<div class="t-label">{t.label}</div>
 			<div class="t-value">
 				{t.value}
@@ -167,11 +189,11 @@
 		<h3>Odsłony w czasie</h3>
 		<span class="faint">{data.range === '24h' ? 'co godzinę' : 'dziennie'}</span>
 	</div>
-	<AreaChart data={data.timeline} />
+	<AreaChart data={data.timeline} color="var(--data-1)" />
 </div>
 
 <div class="grid2">
-	<div class="card">
+	<div class="card" style="--bar: var(--data-2)">
 		<div class="card-head"><h3>Najczęściej odwiedzane strony</h3></div>
 		{#if data.paths.length === 0}
 			<p class="muted small">Brak danych w tym okresie.</p>
@@ -196,7 +218,7 @@
 		{:else}
 			<ul class="rank">
 				{#each data.channels as row (row.label)}
-					<li>
+					<li style="--bar: {CHANNEL_TONE[row.label] ?? 'var(--color-accent)'}">
 						<span class="fill" style="width: {row.share * 100}%"></span>
 						<span class="r-label">{row.label}</span>
 						<span class="r-value">{nf.format(row.value)}</span>
@@ -209,7 +231,7 @@
 </div>
 
 {#if !data.host && data.hostBreakdown.length > 1}
-	<div class="card">
+	<div class="card" style="--bar: var(--data-1)">
 		<div class="card-head">
 			<h3>Serwisy</h3>
 			<span class="faint">odsłony i odwiedzający</span>
@@ -394,8 +416,8 @@
 		color: var(--color-text);
 	}
 	.chip.on {
-		background: var(--color-primary);
-		border-color: var(--color-primary);
+		background: var(--color-accent);
+		border-color: var(--color-accent);
 		color: #fff;
 	}
 
@@ -405,11 +427,22 @@
 		gap: var(--space-3);
 		margin-bottom: var(--space-4);
 	}
+	/* Kafelek trzyma swój kolor w zmiennej --tone: pasek u góry i liczba biorą
+	   go stamtąd, więc zmiana koloru kafelka to jedno miejsce w skrypcie. */
 	.tile {
+		position: relative;
 		background: var(--color-surface);
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-md);
 		padding: var(--space-3) var(--space-4);
+		overflow: hidden;
+	}
+	.tile::before {
+		content: '';
+		position: absolute;
+		inset: 0 0 auto 0;
+		height: 3px;
+		background: var(--tone, var(--color-accent));
 	}
 	.t-label {
 		font-size: var(--text-xs);
@@ -424,6 +457,8 @@
 		display: flex;
 		align-items: baseline;
 		gap: 0.4rem;
+		color: var(--tone, var(--color-text));
+		font-variant-numeric: tabular-nums;
 	}
 	.t-delta {
 		font-size: var(--text-xs);
@@ -490,13 +525,18 @@
 	.rank li + li {
 		margin-top: 2px;
 	}
+	/* Pasek udziału bierze kolor z --bar ustawionego na karcie albo na wierszu.
+	   Domyślny akcent zostaje dla list, które własnego koloru nie potrzebują. */
 	.fill {
 		position: absolute;
 		inset: 0 auto 0 0;
-		background: var(--color-primary);
-		opacity: 0.14;
+		background: var(--bar, var(--color-accent));
+		opacity: 0.18;
 		border-radius: var(--radius-sm);
 		pointer-events: none;
+	}
+	.rank li:hover .fill {
+		opacity: 0.3;
 	}
 	.r-label {
 		position: relative;
@@ -547,7 +587,7 @@
 	}
 	.hc {
 		aspect-ratio: 1;
-		background: var(--color-primary);
+		background: var(--data-1);
 		border-radius: 2px;
 		min-height: 10px;
 		outline: 1px solid var(--color-border);

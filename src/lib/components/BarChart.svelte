@@ -8,7 +8,7 @@
 
 	let {
 		data,
-		color = 'var(--color-primary)',
+		color = 'var(--data-1)',
 		height = 180,
 		maxXLabels = 10
 	}: {
