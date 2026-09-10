@@ -202,7 +202,7 @@ sekcji na dole. Są rzadko potrzebne, a rozpychały widok.
 serwera, a nie w SQL. To jest decyzja biznesowa (ChatGPT to asystent, nie
 kampania), więc ma być w jednym miejscu i dać się przetestować.
 
-## Trzy pułapki, które psują liczby
+## Cztery pułapki, które psują liczby
 
 ### 1. Próbkowanie
 
@@ -235,7 +235,31 @@ nazwę strefy jako ostatni argument.
 toStartOfInterval(timestamp, INTERVAL '1' DAY, 'Europe/Warsaw') AS dzien
 ```
 
-### 3. Liczność ścieżek
+### 3. Kod odpowiedzi porównuj jako tekst
+
+W `blob9` siedzą dwie różne rzeczy: kod odpowiedzi dla odsłon i nazwa wskaźnika
+dla Web Vitals. Dlatego `toUInt32(blob9)` **nie wolno** używać w warunku `WHERE`,
+nawet obok `blob3 = 'pageview'`:
+
+```sql
+-- ŹLE: 422 „type error", bo silnik próbuje sparsować 'LCP' jako liczbę,
+-- zanim odsieje wiersz po typie zdarzenia
+WHERE blob3 = 'pageview' AND toUInt32(blob9) >= 400
+
+-- DOBRZE
+WHERE blob3 = 'pageview' AND blob9 >= '400' AND blob9 <= '599'
+```
+
+Analytics Engine liczy predykaty jednym przebiegiem i nie gwarantuje kolejności.
+Wariantów `toUInt32OrZero` ani `toUInt32OrDefault` nie zna (`unknown function call`),
+więc zostaje porównanie tekstowe. Jest bezpieczne, bo kod HTTP ma zawsze trzy
+cyfry, a przy stałej szerokości porządek leksykograficzny jest tym samym, co
+liczbowy. Stałe `HTTP_SUCCESS` i `HTTP_ERROR` w `src/lib/server/analytics.ts`.
+
+To nie jest hipoteza: wdrożenie Web Vitals położyło tym listę top stron i tabelę
+adresów z błędem, a panel pokazywał wyłącznie komunikat o błędzie 422.
+
+### 4. Liczność ścieżek
 
 Bez normalizacji `/zamowienie/48213` i `/zamowienie/48214` to dwie różne
 pozycje. Po tygodniu lista top stron ma dziesiątki tysięcy wpisów i nie mówi
