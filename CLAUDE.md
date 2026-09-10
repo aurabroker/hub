@@ -324,8 +324,8 @@ odpowiedzi. Decyzję podjął człowiek, nie agent.
 | collector Worker | wdrożony | 2026-09-10 | `aura-analytics-collector`, workers.dev wyłączony |
 | trasy na mierzonych hostach | działają | | 14 wpisów wpisanych ręcznie; ruch widać ze wszystkich ośmiu hostów |
 | przestrzeń KV `VISITOR_SALT` | utworzona | 2026-09-07 | `e3d7ef83448e4a5288b3cddedd31af6e` |
-| panel `/analityka` w HUB | kod gotowy | 2026-09-07 | wymaga `CF_ACCOUNT_ID` i `ANALYTICS_TOKEN` w Pages |
-| Web Vitals | wdrożony w collectorze | 2026-09-10 | sekcja w panelu czeka na wdrożenie HUB (merge do `main`) |
+| panel `/analityka` w HUB | wdrożony | 2026-09-10 | Pages buduje z `main`; wymaga `CF_ACCOUNT_ID` i `ANALYTICS_TOKEN` |
+| Web Vitals | działa | 2026-09-10 | pierwsze zgłoszenia z przeglądarek potwierdzone w danych |
 | archiwum D1 | do zrobienia | | sesja 3 |
 
 ## Dane konta
