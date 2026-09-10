@@ -187,18 +187,43 @@ function num(value: string | number | null | undefined): number {
 }
 
 /**
+ * Filtry po kodzie odpowiedzi, wyrażone **na tekście**, nie na liczbie.
+ *
+ * `toUInt32(blob9)` wygląda naturalniej i tak było tu wcześniej, ale przestaje
+ * działać w chwili, gdy w `blob9` pojawia się cokolwiek nieliczbowego — a od
+ * wdrożenia Web Vitals są tam nazwy wskaźników (`LCP`, `CLS`). Warunek
+ * `blob3 = 'pageview'` tego nie ratuje: Analytics Engine liczy predykaty
+ * jednym przebiegiem i próbuje sparsować `'LCP'` zanim odsieje wiersz, po czym
+ * całe zapytanie kończy się błędem 422 „type error". Zabiło to listę top stron
+ * i tabelę adresów z błędem w produkcji.
+ *
+ * Wariantów `toUInt32OrZero` i `toUInt32OrDefault` Analytics Engine nie zna
+ * (sprawdzone: `unknown function call`), więc zostaje porównanie tekstowe.
+ * Jest bezpieczne, bo **kod odpowiedzi HTTP ma zawsze trzy cyfry** — przy
+ * stałej szerokości porządek leksykograficzny jest tym samym, co liczbowy.
+ * Zweryfikowane na danych: w `blob9` dla odsłon są wyłącznie 200, 301, 304,
+ * 307, 308, 404 i 530, a obie formuły dają te same 3156 błędów.
+ *
+ * Górna granica `<= '599'` nie jest ozdobnikiem: gdyby kiedyś filtr po typie
+ * zdarzenia gdzieś wypadł, `'LCP' >= '400'` byłoby prawdą i wskaźniki
+ * wsiąkłyby do tabeli błędów jako fałszywe alarmy.
+ */
+const HTTP_SUCCESS = `blob9 < '400'`;
+const HTTP_ERROR = `blob9 >= '400' AND blob9 <= '599'`;
+
+/**
  * Kafelki: odsłony, średni czas odpowiedzi, udział błędów i botów.
  *
  * Średnia musi być ważona `_sample_interval` — bez tego jedno rzadkie zdarzenie
- * waży tyle samo co tysiąc częstych. `toUInt32(blob9)` jest bezpieczne, bo
- * filtr `blob3 = 'pageview'` zostawia w tej kolumnie wyłącznie kod odpowiedzi.
+ * waży tyle samo co tysiąc częstych. Kod odpowiedzi porównujemy jako tekst,
+ * powód przy stałej `HTTP_ERROR`.
  */
 export async function loadTotals(win: Window, host: string | null): Promise<Totals> {
 	const [summary, unique] = await Promise.all([
 		runQuery(`SELECT SUM(_sample_interval)                                   AS odslony,
                  SUM(double1 * _sample_interval) / SUM(_sample_interval) AS sredni_czas_ms,
                  quantileExactWeighted(0.75)(double1, _sample_interval)  AS p75_czas_ms,
-                 sumIf(_sample_interval, toUInt32(blob9) >= 400)         AS bledy,
+                 sumIf(_sample_interval, ${HTTP_ERROR})                  AS bledy,
                  sumIf(_sample_interval, blob6 = 'bot')                  AS boty
           FROM ${DATASET} WHERE ${where(win, host, 'pageview')}`),
 		// Unikalnych liczymy bez botów i bez pustych skrótów — kafelek ma mówić o ludziach.
@@ -286,7 +311,7 @@ export function loadTopPaths(win: Window, host: string | null) {
 		'blob2',
 		win,
 		host,
-		`${WITHOUT_BOTS} AND toUInt32(blob9) < 400${WITHOUT_PROBES}`,
+		`${WITHOUT_BOTS} AND ${HTTP_SUCCESS}${WITHOUT_PROBES}`,
 		'(brak)'
 	);
 }
@@ -456,7 +481,7 @@ export async function loadBrokenPaths(win: Window, host: string | null): Promise
 	const rows = await runQuery(
 		`SELECT blob2 AS sciezka, blob9 AS kod, SUM(_sample_interval) AS n
        FROM ${DATASET} WHERE ${where(win, host, 'pageview')}${WITHOUT_BOTS}
-         AND toUInt32(blob9) >= 400${WITHOUT_PROBES}
+         AND ${HTTP_ERROR}${WITHOUT_PROBES}
        GROUP BY sciezka, kod ORDER BY n DESC LIMIT ${TOP_LIMIT}`
 	);
 	return rows.map((r) => ({
