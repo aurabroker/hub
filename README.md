@@ -52,7 +52,8 @@ Niezalogowani/nieuprawnieni są przekierowywani na `/login`. Publiczne trasy (be
 | `/duplicates` | Grupy duplikatów wg e-mail / NIP z akcją „oznacz” (nic nie jest usuwane automatycznie) |
 | `/utm` | **Generator linków UTM** — budowanie otagowanych linków ze słowników, biblioteka linków, krótkie linki `/l/{slug}` z licznikiem kliknięć, kody QR, skracanie w Bitly |
 | `/utm/slowniki` | Serwisy Aura i kanoniczne wartości `utm_*` |
-| `/utm/raport` | Skuteczność kampanii: kliknięcia (własne + Bitly) zestawione z leadami |
+| `/utm/raport` | Skuteczność kampanii: kliknięcia (własne + Bitly), wejścia z analityki i leady |
+| `/analityka` | Ruch na ośmiu serwisach Aura: odsłony, kanały, kampanie, Core Web Vitals (opis w `CLAUDE.md`) |
 
 ## Uruchomienie
 
@@ -156,15 +157,32 @@ policzyć, skąd faktycznie przychodzą leady. Migracja
 Tabele CRM nie są modyfikowane. `utm_attributions.company_id` celowo **nie ma klucza
 obcego** do `crm_companies` — moduł nie zakłada żadnego więzu na tabelach CRM.
 
-### Dwie drogi na stronę, dwa liczniki
+### Trzy drogi na stronę, trzy liczniki
 
-| Droga | Adres | Kto liczy kliknięcia |
+| Droga | Adres | Kto liczy |
 |---|---|---|
 | Własne przekierowanie | `hub.auraexpert.pl/l/{slug}` | HUB, tabela `utm_clicks`, bez limitu |
 | Skrót Bitly | `bit.ly/…` (lub własna domena) | Bitly; do HUB trafiają przyciskiem „Statystyki Bitly” |
+| Pełny adres z `utm_*` | `https://serwis.pl/?utm_source=…` | nikt nie liczy kliknięcia — liczy się dopiero **wejście**, w analityce |
 
 Krótki link Bitly celuje **prosto w adres docelowy**, więc jego kliknięcia nie przechodzą
 przez `/l/`. Bez synchronizacji raport pokazywałby dla takich linków zero.
+
+> ### ⚠️ Zero kliknięć nie znaczy, że kampania nie działa
+>
+> Licznik `utm_clicks` zapisuje **wyłącznie** przejścia przez `/l/{slug}`. Jeśli w reklamie
+> albo w poście wklejono pełny adres z parametrami `utm_*` — a tak dzieje się najczęściej,
+> bo panele reklamowe chcą adresu docelowego — ruch idzie prosto na stronę i przekierownik
+> nie ma czego policzyć.
+>
+> Dlatego `/utm/raport` ma kolumnę **Wejścia**, zasilaną z Analytics Engine (`loadCampaignEntries`
+> w `src/lib/server/analytics.ts`). To jedyny licznik, który widzi ruch niezależnie od drogi,
+> jaką ktoś przyszedł. Kampanie widoczne w ruchu, ale nieobecne w bibliotece linków, dopisują
+> się do tabeli same — link do reklamy bywa sklejany z pominięciem generatora.
+>
+> Kolumna liczy **ostatnie 30 dni**, bo tyle bierzemy z Analytics Engine; kliknięcia są
+> od początku istnienia linku. Dwa różne okna w jednej tabeli to świadomy kompromis,
+> stąd okno wypisane w nagłówku kolumny.
 
 Skracanie w Bitly jest zawsze świadomym kliknięciem, nigdy automatem — plan Starter ma
 **50 linków na miesiąc**, a licznik zużycia widać nad listą linków. Bez `BITLY_TOKEN`

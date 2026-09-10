@@ -112,6 +112,12 @@ implementacja byłaby trzecią okazją do rozjechania się.
 Różnica między kliknięciem a wejściem jest sama w sobie informacją: mówi, ilu
 ludzi odpada między kliknięciem a załadowaniem strony.
 
+Wszystkie trzy stoją obok siebie w `/utm/raport`. Powód jest praktyczny: kampania
+z pełnym adresem `utm_*` w reklamie (zamiast krótkiego linku) ma zero kliknięć
+i bez kolumny wejść wygląda w raporcie na martwą, choć w analityce widać jej ruch.
+Zero kliknięć znaczy „nikt nie przeszedł przez nasz przekierownik", nigdy
+„nikt nie wszedł na stronę".
+
 ### Ograniczenie
 
 Parametry `utm_*` są wyłącznie w pierwszym żądaniu. Bez ciasteczka nie

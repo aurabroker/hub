@@ -335,6 +335,35 @@ export async function loadCampaigns(
 }
 
 /**
+ * Wejścia z kampanii ze wszystkich serwisów naraz, do zestawienia z licznikami
+ * kliknięć w raporcie UTM.
+ *
+ * Różni się od `loadCampaigns` tym, że nie ucina listy do dziesięciu pozycji
+ * i nie filtruje po hoście: raport UTM patrzy na kampanię, a nie na serwis, a
+ * jedna kampania potrafi celować w kilka stron naraz.
+ *
+ * Klucz `zrodlo|medium|kampania` jest wspólny z tabelą `utm_links`, bo obie
+ * strony normalizują wartości tą samą funkcją (`slugifyUtm` w TypeScript,
+ * `public.utm_slugify` w SQL).
+ */
+export async function loadCampaignEntries(win: Window): Promise<Map<string, number>> {
+	const rows = await runQuery(
+		`SELECT blob10 AS zrodlo, blob11 AS medium, blob12 AS kampania,
+             SUM(_sample_interval) AS wejscia
+       FROM ${DATASET}
+       WHERE ${where(win, null, 'pageview')}${WITHOUT_BOTS} AND blob10 != ''
+       GROUP BY zrodlo, medium, kampania ORDER BY wejscia DESC LIMIT 200`
+	);
+
+	const entries = new Map<string, number>();
+	for (const r of rows) {
+		const key = `${String(r.zrodlo ?? '')}|${String(r.medium ?? '')}|${String(r.kampania ?? '')}`;
+		entries.set(key, (entries.get(key) ?? 0) + num(r.wejscia));
+	}
+	return entries;
+}
+
+/**
  * Hosty, dla których w oknie są jakiekolwiek dane — do podpowiedzi w filtrze.
  *
  * Suma musi być na liście kolumn, mimo że jej nie używamy. Analytics Engine
