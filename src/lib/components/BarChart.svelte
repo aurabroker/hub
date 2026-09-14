@@ -10,18 +10,26 @@
 		data,
 		color = 'var(--data-1)',
 		height = 180,
+		width = 720,
 		maxXLabels = 10
 	}: {
 		data: Point[];
 		color?: string;
 		height?: number;
+		/**
+		 * Szerokość układu współrzędnych. SVG skaluje się do szerokości
+		 * kontenera z zachowaniem proporcji, więc to `width` do `height`
+		 * decyduje o wysokości na ekranie — nie sam `height`. Wykres na całą
+		 * szerokość panelu potrzebuje większej wartości, inaczej urośnie
+		 * proporcjonalnie i zje pół ekranu.
+		 */
+		width?: number;
 		maxXLabels?: number;
 	} = $props();
 
 	const PAD_LEFT = 34;
 	const PAD_BOTTOM = 22;
 	const PAD_TOP = 8;
-	const width = 720;
 
 	let max = $derived(Math.max(1, ...data.map((d) => d.value)));
 	let innerW = $derived(width - PAD_LEFT);
