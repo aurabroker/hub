@@ -27,6 +27,22 @@ export const CODE_LABELS: Record<CanonicalCode, string> = {
 	inne: 'Inne'
 };
 
+/**
+ * Kolor kategorii jako nazwa zmiennej CSS (definicje w `src/app.css`).
+ * Kropka przy nazwie zapytania pozwala przebiec wzrokiem kolumnę bez czytania —
+ * dlatego kolor jest przypisany do kodu, a nie dobierany w miejscu użycia.
+ */
+export const CODE_COLORS: Record<CanonicalCode, string> = {
+	oc: 'var(--c-oc)',
+	konsultacja: 'var(--c-konsultacja)',
+	tax: 'var(--c-tax)',
+	utrata_dochodu: 'var(--c-utrata)',
+	zdrowie: 'var(--c-zdrowie)',
+	grupowe: 'var(--c-grupowe)',
+	brak: 'var(--c-brak)',
+	inne: 'var(--c-inne)'
+};
+
 /** Normalizuje warianty myślników (EN/EM dash, minus) do zwykłego '-'. */
 function normalizeDashes(value: string): string {
 	return value.replace(/[‐‑‒–—−]/g, '-');

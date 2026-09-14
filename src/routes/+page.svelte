@@ -1,6 +1,6 @@
 <script lang="ts">
 	import BarChart from '$lib/components/BarChart.svelte';
-	import { CODE_LABELS, type CanonicalCode } from '$lib/categories';
+	import { CODE_LABELS, CODE_COLORS, type CanonicalCode } from '$lib/categories';
 	import type { PageServerData } from './$types';
 
 	let { data }: { data: PageServerData } = $props();
@@ -17,9 +17,23 @@
 	let signupPoints = $derived(
 		data.signups.map((s) => ({ label: shortDate(s.dzien), title: s.dzien, value: s.n }))
 	);
-	let interestPoints = $derived(
-		data.interest.map((i) => ({ label: codeLabel(i.kategoria), value: i.n }))
-	);
+	/**
+	 * Rozkład zapytań jako poziome słupki, nie pionowe. Nazwy kategorii mają po
+	 * kilkanaście znaków i pod pionowymi słupkami nachodziły na siebie
+	 * („Ubezpieczenia grupowe" wchodziło w „Pakiety zdrowotne"). Poziomo każda
+	 * nazwa dostaje własny wiersz i nie trzeba przekrzywiać głowy.
+	 */
+	let interestRows = $derived.by(() => {
+		const max = Math.max(1, ...data.interest.map((i) => i.n));
+		const suma = data.interest.reduce((acc, i) => acc + i.n, 0);
+		return data.interest.map((i) => ({
+			kod: i.kategoria as CanonicalCode,
+			label: codeLabel(i.kategoria),
+			value: i.n,
+			udzial: suma ? Math.round((i.n / suma) * 100) : 0,
+			szerokosc: (i.n / max) * 100
+		}));
+	});
 
 	// Suma wysyłek per dzień (sekcje rozbite w tabeli poniżej)
 	let sentPerDay = $derived.by(() => {
@@ -73,13 +87,29 @@
 	</div>
 	<div class="card">
 		<h3 style="margin-bottom: var(--space-4)">Której sekcji szukają (cała baza)</h3>
-		<BarChart data={interestPoints} color="var(--c-oc)" maxXLabels={8} />
+		<div class="hbars">
+			{#each interestRows as row (row.kod)}
+				<div class="hbar">
+					<span class="hbar-label" title={row.label}>{row.label}</span>
+					<span class="hbar-track">
+						<span
+							class="hbar-fill"
+							style="width: {row.szerokosc}%; background: {CODE_COLORS[row.kod] ?? 'var(--c-inne)'}"
+						></span>
+					</span>
+					<span class="hbar-value">{row.value}<span class="faint"> · {row.udzial}%</span></span>
+				</div>
+			{:else}
+				<p class="muted">Brak danych.</p>
+			{/each}
+		</div>
 	</div>
 </div>
 
 <div class="card">
 	<h3 style="margin-bottom: var(--space-4)">Wysłane maile dziennie</h3>
-	<BarChart data={sentPerDay} color="var(--c-grupowe)" />
+	<!-- Karta na całą szerokość: szerszy układ współrzędnych trzyma wykres płaski. -->
+	<BarChart data={sentPerDay} color="var(--c-grupowe)" width={1400} />
 </div>
 
 <div class="table-wrap">

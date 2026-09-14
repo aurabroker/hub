@@ -11,12 +11,23 @@
 	--color-success: #10b981;
 	--color-warning: #f59e0b;
 
+	/* Osiem kategorii, osiem rozróżnialnych barw. Zieleń przypada konsultacji,
+	   bo to ta kategoria świeci na zielono w tabelach — kropka i wiersz mówią
+	   wtedy to samo. `--c-oc` zostaje firmową turkusową, używa jej też wykres
+	   na pulpicie. */
 	--c-oc: #01696f;
-	--c-utrata: #b45309;
+	--c-konsultacja: #059669;
 	--c-tax: #7c3aed;
+	--c-utrata: #b45309;
+	--c-zdrowie: #0891b2;
 	--c-grupowe: #2563eb;
-	--c-zdrowie: #0d9488;
-	--c-konsultacja: #64748b;
+	--c-brak: #94a3b8;
+	--c-inne: #64748b;
+
+	/* Maksymalna szerokość treści. Panel jest listą tabel, a wiersz rozciągnięty
+	   na 2500 px monitora zmusza oko do wędrówki przez pustkę między kolumnami.
+	   1360 px mieści siedem kolumn bez ściskania i bez rozłażenia. */
+	--content-max: 1360px;
 
 	/* Kolor akcentu: to, co można kliknąć albo co jest aktywne. Granat
 	   `--color-primary` zostaje kolorem tekstu i tła, nie sygnałem. */
@@ -81,6 +92,18 @@
 	--vital-good: #34d399;
 	--vital-mid: #fbbf24;
 	--vital-poor: #f87171;
+
+	/* Kropki kategorii to kilka pikseli powierzchni — ciemne barwy gasną na
+	   ciemnym tle szybciej niż wypełnione kształty. Jaśniejsze warianty tej
+	   samej rodziny. */
+	--c-oc: #2dd4bf;
+	--c-konsultacja: #34d399;
+	--c-tax: #a78bfa;
+	--c-utrata: #fbbf24;
+	--c-zdrowie: #22d3ee;
+	--c-grupowe: #60a5fa;
+	--c-brak: #64748b;
+	--c-inne: #cbd5e1;
 }
 
 :root[data-theme='dark'] .badge-success {
@@ -141,7 +164,10 @@ a {
 .page-subtitle {
 	font-size: var(--text-sm);
 	color: var(--color-text-muted);
-	margin-bottom: var(--space-8);
+	margin-bottom: var(--space-6);
+	/* Miara wiersza: dłuższy tekst niż ~90 znaków oko gubi przy powrocie
+	   do początku następnej linii. */
+	max-width: 68ch;
 }
 
 .app-container {
@@ -241,8 +267,10 @@ a {
 }
 
 .content-area {
-	padding: var(--space-8);
+	padding: var(--space-6) var(--space-8) var(--space-8);
 	width: 100%;
+	max-width: var(--content-max);
+	margin: 0 auto;
 }
 
 .kpi-grid {
@@ -347,9 +375,31 @@ a {
 
 .tbl th,
 .tbl td {
-	padding: var(--space-3) var(--space-5);
+	padding: var(--space-3) var(--space-4);
 	border-bottom: 1px solid var(--color-border);
 	font-size: var(--text-sm);
+	vertical-align: top;
+}
+
+/* Wiersz tabeli ma jedną rzecz główną i resztę w tle. Bez tego podziału
+   siedem kolumn o tej samej wadze czyta się jak tabela parametrów. */
+.cell-main {
+	font-weight: 600;
+	color: var(--color-text);
+	line-height: 1.35;
+}
+
+.cell-sub {
+	display: block;
+	margin-top: 1px;
+	font-size: var(--text-xs);
+	color: var(--color-text-muted);
+	line-height: 1.35;
+}
+
+.cell-sub.mono {
+	color: var(--color-text-faint);
+	letter-spacing: 0;
 }
 
 .tbl th {
@@ -631,16 +681,33 @@ a {
 	cursor: pointer;
 }
 
+/* Świeży wpis: delikatny akcent, bez krzyku. Zieleń jest zarezerwowana dla
+   wiersza, który wymaga działania (patrz .row-hot) — gdyby świeciła na każdym
+   dzisiejszym wierszu, przestałaby cokolwiek znaczyć. */
 .tbl tbody tr.row-today td {
-	background: color-mix(in srgb, var(--color-success) 10%, transparent);
+	background: color-mix(in srgb, var(--color-accent) 5%, transparent);
 }
 
 .tbl tbody tr.row-today:hover td {
-	background: color-mix(in srgb, var(--color-success) 16%, transparent);
+	background: color-mix(in srgb, var(--color-accent) 9%, transparent);
 }
 
 .tbl tbody tr.row-today td:first-child {
-	border-left: 3px solid var(--color-success);
+	box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+/* Gorący lead: świeży wpis, w którym klient prosi o konsultację. Jedyne
+   miejsce w tabeli, gdzie pojawia się zieleń — znaczy „oddzwoń". */
+.tbl tbody tr.row-hot td {
+	background: color-mix(in srgb, var(--color-success) 9%, transparent);
+}
+
+.tbl tbody tr.row-hot:hover td {
+	background: color-mix(in srgb, var(--color-success) 15%, transparent);
+}
+
+.tbl tbody tr.row-hot td:first-child {
+	box-shadow: inset 3px 0 0 var(--color-success);
 }
 
 .tbl tbody tr.date-sep td {
@@ -663,8 +730,132 @@ a {
 }
 
 .badge-today {
-	background: var(--color-success);
-	color: #fff;
+	background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+	color: var(--color-accent);
+}
+
+:root[data-theme='dark'] .badge-today {
+	color: var(--color-accent);
+}
+
+/* Poziomy wykres słupkowy dla kategorii o długich nazwach. Etykieta, tor
+   i liczba w jednej siatce — tory zaczynają się w tej samej pionowej linii,
+   więc długości da się porównać wzrokiem bez czytania liczb. */
+.hbars {
+	display: grid;
+	gap: var(--space-2);
+}
+
+.hbar {
+	display: grid;
+	grid-template-columns: minmax(0, 11rem) 1fr auto;
+	align-items: center;
+	gap: var(--space-3);
+}
+
+.hbar-label {
+	font-size: var(--text-sm);
+	color: var(--color-text-muted);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.hbar-track {
+	height: 10px;
+	border-radius: 9999px;
+	background: var(--color-surface-offset);
+	overflow: hidden;
+}
+
+:root[data-theme='dark'] .hbar-track {
+	background: color-mix(in srgb, var(--color-border) 60%, transparent);
+}
+
+.hbar-fill {
+	display: block;
+	height: 100%;
+	border-radius: 9999px;
+	/* Najkrótszy słupek ma zostać widoczny, a nie zniknąć do zera pikseli. */
+	min-width: 3px;
+}
+
+.hbar-value {
+	font-size: var(--text-sm);
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+/* Znacznik kategorii zapytania: kropka niesie kolor, tekst zostaje czytelny.
+   Kolor podstawiamy zmienną `--chip`, żeby jedna klasa obsłużyła wszystkie
+   osiem kategorii. */
+.chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: var(--text-xs);
+	font-weight: 500;
+	color: var(--color-text-muted);
+	white-space: nowrap;
+}
+
+.chip::before {
+	content: '';
+	width: 7px;
+	height: 7px;
+	flex: none;
+	border-radius: 50%;
+	background: var(--chip, var(--color-text-faint));
+}
+
+/* Przyciski filtrowania nad tabelą. Wyglądem bliżej etykiety niż przycisku,
+   bo to przełącznik widoku, a nie akcja zmieniająca dane. */
+.chip-filter {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 10px;
+	border: 1px solid var(--color-border);
+	border-radius: 9999px;
+	background: var(--color-surface);
+	color: var(--color-text-muted);
+	font: inherit;
+	font-size: var(--text-xs);
+	font-weight: 500;
+	cursor: pointer;
+	transition: var(--transition);
+}
+
+.chip-filter:hover {
+	border-color: var(--color-accent);
+	color: var(--color-text);
+}
+
+.chip-filter[aria-pressed='true'] {
+	border-color: var(--color-accent);
+	background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+	color: var(--color-accent);
+}
+
+.chip-filter[aria-pressed='true'].is-hot {
+	border-color: var(--color-success);
+	background: color-mix(in srgb, var(--color-success) 12%, transparent);
+	color: var(--color-success);
+}
+
+/* Długa lista dostaje własne okno przewijania i przyklejony nagłówek —
+   przy 1300 wierszach nazwy kolumn są potrzebne także na dole tabeli. */
+.table-scroll.tall {
+	max-height: calc(100vh - 19rem);
+	min-height: 18rem;
+	overflow-y: auto;
+}
+
+.table-scroll.tall thead th {
+	position: sticky;
+	top: 0;
+	z-index: 1;
 }
 
 .btn-icon {

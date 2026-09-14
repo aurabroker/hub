@@ -263,6 +263,36 @@ PNG składany jest w przeglądarce z pobranego SVG.
 Surowy adres IP nie jest nigdzie zapisywany, a przy braku sekretu nie zapisujemy nawet
 skrótu — niesolony hash adresu IPv4 jest odwracalny w kilka sekund.
 
+## Zasady wyglądu panelu
+
+Panel jest narzędziem, w które ktoś patrzy codziennie po kilka godzin. Stąd kilka
+reguł, które łatwo złamać przy dokładaniu kolejnego ekranu.
+
+1. **Treść ma maksymalną szerokość** (`--content-max`, 1360 px, wyśrodkowana).
+   Tabela rozciągnięta na całą szerokość monitora zmusza oko do wędrówki przez
+   pustkę między kolumnami i dokładnie tak powstaje wrażenie „instrukcji obsługi".
+   Akapity dodatkowo ograniczone do 68 znaków (`.page-subtitle`).
+2. **Szerokości kolumn podawaj wprost** (`<colgroup>`). Bez tego przeglądarka
+   rozdziela je wg treści i kolumna z datą odpływa na drugi koniec ekranu.
+3. **Jeden wiersz, jedna rzecz główna.** Nazwa firmy w `.cell-main`, reszta
+   (osoba, NIP, telefon) w `.cell-sub` — mniejsza i wyszarzona. Siedem kolumn
+   o tej samej wadze czyta się jak tabela parametrów.
+4. **Zieleń w tabeli znaczy „zadzwoń", nigdy „wpadło dzisiaj".** Wiersz świeci
+   na zielono (`.row-hot`) wyłącznie wtedy, gdy zapis jest świeży **i** klient
+   prosi o konsultację. Świeży wpis bez konsultacji dostaje spokojny akcent
+   (`.row-today`). Gdyby zieleń świeciła na każdym dzisiejszym wierszu,
+   przestałaby cokolwiek znaczyć.
+5. **Kolor kategorii pochodzi z jednego miejsca** — `CODE_COLORS`
+   w `src/lib/categories.ts`, wskazujące zmienne `--c-*` z `src/app.css`.
+   Osiem kategorii ma osiem rozróżnialnych barw, osobno dla motywu jasnego
+   i ciemnego. Przy dokładaniu kategorii sprawdź, czy nie powtarzasz odcienia.
+6. **Wykres skaluje się do szerokości kontenera z zachowaniem proporcji**, więc
+   o wysokości na ekranie decyduje stosunek `width` do `height` w `BarChart`,
+   a nie sam `height`. Karta na całą szerokość potrzebuje większego `width`
+   (pulpit podaje 1400), inaczej wykres rośnie proporcjonalnie i zjada pół ekranu.
+7. **Długie nazwy nie mieszczą się pod pionowymi słupkami.** Rozkład kategorii
+   rysujemy poziomo (`.hbars`) — każda nazwa ma własny wiersz.
+
 ## RODO (wymóg twardy)
 
 - **Zgody RODO są zebrane dla całej bazy Klientów** (potwierdzone przez właściciela

@@ -3,6 +3,7 @@
 	import type { PageServerData } from './$types';
 	import type { CrmCompany } from '$lib/ud/types';
 	import { dayKey, todayKey, fmtDateTime, dayLabel } from '$lib/ud/format';
+	import { normalizeInterest, CODE_LABELS, CODE_COLORS } from '$lib/categories';
 
 	let { data }: { data: PageServerData } = $props();
 
@@ -13,6 +14,15 @@
 
 	function isToday(iso: string): boolean {
 		return dayKey(iso) === today;
+	}
+
+	/**
+	 * Zapytanie o konsultację — zapis, który prosi wprost o rozmowę, więc
+	 * wyróżniamy go zielenią. Ta sama zasada co w Bazie Klientów: zieleń
+	 * w tabeli znaczy „oddzwoń", nigdy „wpadło dzisiaj".
+	 */
+	function doKontaktu(ubezpieczenie: string | null): boolean {
+		return normalizeInterest(ubezpieczenie) === 'konsultacja';
 	}
 
 	let signups = $derived(data.signups.filter((s) => !!s.created_at));
@@ -114,6 +124,7 @@
 				<tr>
 					<th>Firma / Osoba</th>
 					<th>Kontakt</th>
+					<th>Zapytanie</th>
 					<th>Miasto / Branża</th>
 					<th>Data zapisu</th>
 				</tr>
@@ -122,33 +133,48 @@
 				{#each grouped as row (row.kind === 'header' ? 'h-' + row.dayKey : 'r-' + row.company.id)}
 					{#if row.kind === 'header'}
 						<tr class="date-sep" class:today-sep={row.today}>
-							<td colspan="4">{row.label}</td>
+							<td colspan="5">{row.label}</td>
 						</tr>
 					{:else}
 						{@const c = row.company}
-						<tr class="row-click" class:row-today={row.today} onclick={() => goto(`/clients/${c.id}`)}>
+						{@const kod = normalizeInterest(c.ubezpieczenie)}
+						{@const hot = doKontaktu(c.ubezpieczenie)}
+						<tr
+							class="row-click"
+							class:row-hot={hot}
+							class:row-today={row.today && !hot}
+							onclick={() => goto(`/clients/${c.id}`)}
+						>
 							<td>
-								<strong>{c.company ?? c.contact ?? '—'}</strong>
-								{#if c.company && c.contact}<br /><span class="faint">{c.contact}</span>{/if}
-								{#if c.nip}<br /><span class="faint">NIP: {c.nip}</span>{/if}
+								<span class="cell-main">{c.company ?? c.contact ?? '—'}</span>
+								{#if c.company && c.contact}<span class="cell-sub">{c.contact}</span>{/if}
+								{#if c.nip}<span class="cell-sub mono">NIP {c.nip}</span>{/if}
 							</td>
 							<td>
 								{c.email ?? '—'}
-								{#if c.phone}<br /><span class="faint">{c.phone}</span>{/if}
+								{#if c.phone}<span class="cell-sub">{c.phone}</span>{/if}
+							</td>
+							<td>
+								<span class="chip" style="--chip: {CODE_COLORS[kod]}">{CODE_LABELS[kod]}</span>
+								{#if hot}
+									<span class="cell-sub" style="color: var(--color-success); font-weight: 600">
+										oddzwoń
+									</span>
+								{/if}
 							</td>
 							<td>
 								{c.city ?? '—'}
-								{#if c.industry}<br /><span class="faint">{c.industry}</span>{/if}
+								{#if c.industry}<span class="cell-sub">{c.industry}</span>{/if}
 							</td>
 							<td style="white-space: nowrap">
 								{fmtDateTime(c.created_at)}
-								{#if row.today}<span class="badge badge-today" style="margin-left: 6px">DZIŚ</span>{/if}
+								{#if row.today}<span class="badge badge-today" style="margin-left: 6px">dziś</span>{/if}
 							</td>
 						</tr>
 					{/if}
 				{:else}
 					<tr>
-						<td colspan="4" class="muted" style="text-align: center; padding: var(--space-8)">
+						<td colspan="5" class="muted" style="text-align: center; padding: var(--space-8)">
 							{signups.length === 0
 								? 'Baza crm_companies jest jeszcze pusta — pierwszy zapis pojawi się tu automatycznie.'
 								: 'Brak zapisów w wybranym zakresie.'}
