@@ -4,6 +4,7 @@
 	import type { CrmCompany } from '$lib/ud/types';
 	import { dayKey, todayKey, fmtDateTime, dayLabel } from '$lib/ud/format';
 	import { normalizeInterest, CODE_LABELS, CODE_COLORS } from '$lib/categories';
+	import Sparkline from '$lib/components/Sparkline.svelte';
 
 	let { data }: { data: PageServerData } = $props();
 
@@ -35,6 +36,31 @@
 			list = list.filter((s) => now - new Date(s.created_at).getTime() <= days * 864e5);
 		}
 		return list;
+	});
+
+	/**
+	 * Zapisy dzień po dniu za ostatnie 30 dni, z zerami dla dni bez zapisu.
+	 * Dziura w osi czasu kłamałaby o kształcie — dwa zapisy w odstępie tygodnia
+	 * wyglądałyby na dwa dni z rzędu.
+	 */
+	let dziennie = $derived.by(() => {
+		const licznik = new Map<string, number>();
+		for (const s of signups) licznik.set(dayKey(s.created_at), (licznik.get(dayKey(s.created_at)) ?? 0) + 1);
+		return Array.from({ length: 30 }, (_, i) => {
+			const d = new Date(now - (29 - i) * 864e5);
+			return licznik.get(dayKey(d)) ?? 0;
+		});
+	});
+
+	/** Stan bazy dzień po dniu, liczony wstecz od dzisiejszej sumy. */
+	let narastajaco = $derived.by(() => {
+		const out: number[] = [];
+		let stan = signups.length;
+		for (let i = dziennie.length - 1; i >= 0; i--) {
+			out.unshift(stan);
+			stan -= dziennie[i];
+		}
+		return out;
 	});
 
 	let kpi = $derived.by(() => {
@@ -72,9 +98,8 @@
 
 <h1 class="page-title">Zapisy dzienne</h1>
 <p class="page-subtitle">
-	Codzienne zapisy do bazy kontaktów (<span class="mono">crm_companies</span>). Zapisy z dnia
-	dzisiejszego zaznaczone <strong style="color: var(--color-success)">na zielono</strong>. Kliknij
-	wiersz, aby otworzyć pełną kartę Klienta.
+	Codzienne zapisy do bazy kontaktów. <strong style="color: var(--color-success)">Na zielono</strong>
+	świecą zapytania o konsultację — te czekają na telefon. Kliknij wiersz, aby otworzyć kartę Klienta.
 </p>
 
 {#if data.error}
@@ -84,26 +109,40 @@
 {/if}
 
 <div class="kpi-grid">
-	<div class="kpi-card" style="border-color: var(--color-success)">
+	<div class="kpi-card">
 		<div class="kpi-label">Zapisy dziś</div>
-		<div class="kpi-value" style="color: var(--color-success)">{kpi.today}</div>
+		<div class="kpi-value" style:color={kpi.today > 0 ? 'var(--color-success)' : undefined}>
+			{kpi.today}
+		</div>
+		<div class="kpi-spark">
+			<Sparkline data={dziennie} color="var(--data-2)" label="Zapisy dzień po dniu" />
+		</div>
 		<div class="kpi-sub">
-			{kpi.today > 0 ? 'zaznaczone na zielono na liście' : 'jeszcze nikt się dziś nie zapisał'}
+			{kpi.today > 0 ? 'ostatnie 30 dni na wykresie' : 'jeszcze nikt się dziś nie zapisał'}
 		</div>
 	</div>
 	<div class="kpi-card">
 		<div class="kpi-label">Ostatnie 7 dni</div>
 		<div class="kpi-value">{kpi.d7}</div>
+		<div class="kpi-spark">
+			<Sparkline data={dziennie.slice(-7)} color="var(--data-1)" label="Zapisy w ostatnim tygodniu" />
+		</div>
 		<div class="kpi-sub">nowe zapisy</div>
 	</div>
 	<div class="kpi-card">
 		<div class="kpi-label">Ostatnie 30 dni</div>
 		<div class="kpi-value">{kpi.d30}</div>
+		<div class="kpi-spark">
+			<Sparkline data={dziennie} color="var(--data-3)" label="Zapisy w ostatnim miesiącu" />
+		</div>
 		<div class="kpi-sub">nowe zapisy</div>
 	</div>
 	<div class="kpi-card">
 		<div class="kpi-label">Łącznie w bazie</div>
-		<div class="kpi-value">{kpi.total}</div>
+		<div class="kpi-value">{kpi.total.toLocaleString('pl-PL')}</div>
+		<div class="kpi-spark">
+			<Sparkline data={narastajaco} color="var(--data-4)" label="Wielkość bazy przez 30 dni" />
+		</div>
 		<div class="kpi-sub">wszystkie kontakty</div>
 	</div>
 </div>

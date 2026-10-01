@@ -1,5 +1,6 @@
 <script lang="ts">
 	import BarChart from '$lib/components/BarChart.svelte';
+	import Sparkline from '$lib/components/Sparkline.svelte';
 	import { CODE_LABELS, CODE_COLORS, type CanonicalCode } from '$lib/categories';
 	import type { PageServerData } from './$types';
 
@@ -35,6 +36,46 @@
 		}));
 	});
 
+	/**
+	 * Serie do sparkline'ów. Każda liczba na górze strony dostaje kształt
+	 * ostatnich 30 dni — sama liczba mówi „ile", przebieg mówi „dokąd to idzie".
+	 */
+
+	/** Wielkość bazy dzień po dniu. Liczymy wstecz od stanu dzisiejszego:
+	 *  stan sprzed dnia = stan po dniu minus zapisy z tego dnia. */
+	let contactsSeries = $derived.by(() => {
+		const out: number[] = [];
+		let stan = data.kpi.contactsTotal;
+		for (let i = data.signups.length - 1; i >= 0; i--) {
+			out.unshift(stan);
+			stan -= data.signups[i].n;
+		}
+		return out;
+	});
+
+	/** Wysyłki, otwarcia i kliknięcia zsumowane po dniu (w bazie są per sekcja). */
+	let perDay = $derived.by(() => {
+		const byDay = new Map<string, { wyslane: number; otwarcia: number; klikniecia: number }>();
+		for (const row of data.sentDaily) {
+			const acc = byDay.get(row.dzien) ?? { wyslane: 0, otwarcia: 0, klikniecia: 0 };
+			acc.wyslane += row.wyslane;
+			acc.otwarcia += row.otwarcia;
+			acc.klikniecia += row.klikniecia;
+			byDay.set(row.dzien, acc);
+		}
+		return [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+	});
+
+	/** Dzienny wskaźnik w procentach. Dzień bez wysyłki daje zero, nie dziurę —
+	 *  sparkline ma mieć ciągłą oś czasu. */
+	function dailyRate(pick: (d: { wyslane: number; otwarcia: number; klikniecia: number }) => number) {
+		return perDay.map(([, d]) => (d.wyslane > 0 ? Math.round((pick(d) / d.wyslane) * 100) : 0));
+	}
+
+	let sentSeries = $derived(perDay.map(([, d]) => d.wyslane));
+	let openSeries = $derived(dailyRate((d) => d.otwarcia));
+	let clickSeries = $derived(dailyRate((d) => d.klikniecia));
+
 	// Suma wysyłek per dzień (sekcje rozbite w tabeli poniżej)
 	let sentPerDay = $derived.by(() => {
 		const byDay = new Map<string, number>();
@@ -56,27 +97,46 @@
 	<div class="kpi-card">
 		<div class="kpi-label">Kontakty w bazie</div>
 		<div class="kpi-value">{data.kpi.contactsTotal.toLocaleString('pl-PL')}</div>
-		<div class="kpi-sub">+{data.kpi.newWeek} w tym tygodniu, +{data.kpi.newMonth} w 30 dni</div>
-	</div>
-	<div class="kpi-card">
-		<div class="kpi-label">Duplikaty do rozwiązania</div>
-		<div class="kpi-value" style:color={data.kpi.duplicateGroups > 0 ? 'var(--color-warning)' : undefined}>
-			{data.kpi.duplicateGroups}
+		<div class="kpi-spark">
+			<Sparkline data={contactsSeries} color="var(--data-1)" label="Wielkość bazy przez 30 dni" />
 		</div>
-		<div class="kpi-sub"><a href="/duplicates">grupy wg e-mail / NIP →</a></div>
+		<div class="kpi-sub">+{data.kpi.newWeek} w tygodniu · +{data.kpi.newMonth} w 30 dni</div>
 	</div>
+
 	<div class="kpi-card">
 		<div class="kpi-label">Maile wysłane</div>
 		<div class="kpi-value">{data.kpi.sent30.toLocaleString('pl-PL')}</div>
-		<div class="kpi-sub">ostatnie 30 dni ({data.kpi.sentToday} dziś)</div>
-	</div>
-	<div class="kpi-card">
-		<div class="kpi-label">Open / click rate (30 dni)</div>
-		<div class="kpi-value">
-			{data.kpi.openRate ?? '—'}{data.kpi.openRate != null ? '%' : ''}
-			<span class="muted" style="font-size: 1rem">/ {data.kpi.clickRate ?? '—'}{data.kpi.clickRate != null ? '%' : ''}</span>
+		<div class="kpi-spark">
+			<Sparkline data={sentSeries} color="var(--data-3)" label="Wysyłki dzień po dniu" />
 		</div>
-		<div class="kpi-sub">otwarcia orientacyjne — kliknięcia to pewniejszy sygnał</div>
+		<div class="kpi-sub">30 dni · {data.kpi.sentToday} dziś</div>
+	</div>
+
+	<div class="kpi-card">
+		<div class="kpi-label">Open rate</div>
+		<div class="kpi-value">{data.kpi.openRate ?? '—'}{data.kpi.openRate != null ? '%' : ''}</div>
+		<div class="kpi-spark">
+			<Sparkline data={openSeries} color="var(--data-4)" label="Otwarcia dzień po dniu" />
+		</div>
+		<div class="kpi-sub">orientacyjnie</div>
+	</div>
+
+	<div class="kpi-card">
+		<div class="kpi-label">Click rate</div>
+		<div class="kpi-value">{data.kpi.clickRate ?? '—'}{data.kpi.clickRate != null ? '%' : ''}</div>
+		<div class="kpi-spark">
+			<Sparkline data={clickSeries} color="var(--data-5)" label="Kliknięcia dzień po dniu" />
+		</div>
+		<div class="kpi-sub">pewniejszy sygnał</div>
+	</div>
+
+	<div class="kpi-card">
+		<div class="kpi-label">Duplikaty</div>
+		<div
+			class="kpi-value"
+			style:color={data.kpi.duplicateGroups > 0 ? 'var(--color-warning)' : undefined}
+		>{data.kpi.duplicateGroups}</div>
+		<div class="kpi-sub"><a href="/duplicates">grupy wg e-mail / NIP →</a></div>
 	</div>
 </div>
 
