@@ -292,6 +292,20 @@ reguł, które łatwo złamać przy dokładaniu kolejnego ekranu.
    (pulpit podaje 1400), inaczej wykres rośnie proporcjonalnie i zjada pół ekranu.
 7. **Długie nazwy nie mieszczą się pod pionowymi słupkami.** Rozkład kategorii
    rysujemy poziomo (`.hbars`) — każda nazwa ma własny wiersz.
+8. **Liczby bez pudełek.** Metryki na górze strony (`.kpi-grid`) nie mają ramki,
+   tła ani zaokrąglenia. Ramka wokół liczby dokłada trzy kreski i zero
+   informacji; przy czterech metrykach to dwanaście kresek na drodze do czterech
+   liczb. Liczba dostaje 2,5 rem i `tabular-nums`, podpis idzie nad nią, reszta
+   pod spodem.
+9. **Każda metryka z serią czasową dostaje sparkline** (`Sparkline.svelte`) tuż
+   pod liczbą. Liczba mówi „ile", sparkline mówi „dokąd to idzie". To wykres bez
+   osi, siatki i podpisów — nie służy do odczytywania wartości, tylko kształtu.
+   Kolor metryki przeniósł się z paska nad kafelkiem na linię sparkline'u, więc
+   nadal rozdziela metryki, ale przy okazji rysuje dane.
+10. **Sparkline ma stały rozmiar w pikselach**, nie płynny. Rozciąganie w jednej
+    osi zrobiłoby z kropki końcowej elipsę.
+11. **Podpis metryki dosuwamy do dołu** (`margin-top: auto`). Bez tego metryka
+    z dwuliniowym podpisem podnosi sparkline sąsiadki i rząd robi się poszarpany.
 
 ## RODO (wymóg twardy)
 
