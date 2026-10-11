@@ -67,6 +67,7 @@ export const load: PageServerLoad = async ({ params, url }) => {
 	};
 	let deadUnsubscribeLink = false;
 	let templateError: string | null = null;
+	let templateForbidden = false;
 	if (campaign.from_email) sender = { address: campaign.from_email, source: 'kampania' };
 	else if (category?.from_email) sender = { address: category.from_email, source: 'sekcja' };
 	if (category?.resend_template_id && !category.html_body?.trim()) {
@@ -76,6 +77,10 @@ export const load: PageServerLoad = async ({ params, url }) => {
 			if (!campaign.from_email && !category.from_email && template.info.from) {
 				sender = { address: template.info.from, source: 'szablon Resend' };
 			}
+		} else if (template.forbidden) {
+			// Wysyłka idzie wtedy jak dawniej (bez nadawcy z szablonu i bez kontroli
+			// linku wypisu) — operator musi wiedzieć, że nadawcę trzeba ustawić w sekcji.
+			templateForbidden = true;
 		} else {
 			// Wysyłka w tej sytuacji czeka (nie spada na RESEND_FROM), więc panel też
 			// nie może udawać, że wiadomości wyjdą z RESEND_FROM.
@@ -106,7 +111,8 @@ export const load: PageServerLoad = async ({ params, url }) => {
 		health,
 		sender,
 		deadUnsubscribeLink,
-		templateError
+		templateError,
+		templateForbidden
 	};
 };
 

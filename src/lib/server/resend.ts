@@ -105,6 +105,8 @@ export interface ResendTemplateInfo {
 /** Pamięć szablonów w obrębie izolatu — szablon zmienia się rzadko. */
 const templateCache = new Map<string, { info: ResendTemplateInfo; expires: number }>();
 const TEMPLATE_CACHE_MS = 5 * 60_000;
+/** Do kiedy nie pytamy o szablony, bo klucz API nie ma prawa ich czytać (401/403). */
+let templateReadForbiddenUntil = 0;
 
 /**
  * Odczyt szablonu Resend (GET /templates/:id). Przy błędzie API zwraca ostatnią
@@ -114,12 +116,19 @@ const TEMPLATE_CACHE_MS = 5 * 60_000;
  */
 export async function getResendTemplate(
 	templateId: string
-): Promise<{ ok: true; info: ResendTemplateInfo } | { ok: false; error: string; rateLimited?: boolean }> {
+): Promise<
+	| { ok: true; info: ResendTemplateInfo }
+	| { ok: false; error: string; rateLimited?: boolean; forbidden?: boolean }
+> {
 	if (!env.RESEND_API_KEY) return { ok: false, error: 'Brak RESEND_API_KEY w środowisku' };
 	const cached = templateCache.get(templateId);
 	if (cached && cached.expires > Date.now()) return { ok: true, info: cached.info };
+	const forbiddenError = 'Klucz API Resend nie ma prawa odczytu szablonów (tylko wysyłka)';
+	if (templateReadForbiddenUntil > Date.now()) {
+		return { ok: false, error: forbiddenError, forbidden: true };
+	}
 
-	let failure: { error: string; rateLimited?: boolean };
+	let failure: { error: string; rateLimited?: boolean; forbidden?: boolean };
 	try {
 		const res = await fetch(`https://api.resend.com/templates/${encodeURIComponent(templateId)}`, {
 			headers: { Authorization: `Bearer ${env.RESEND_API_KEY}` }
@@ -136,10 +145,17 @@ export async function getResendTemplate(
 			templateCache.set(templateId, { info, expires: Date.now() + TEMPLATE_CACHE_MS });
 			return { ok: true, info };
 		}
-		failure = {
-			error: `Odczyt szablonu Resend ${templateId}: HTTP ${res.status}`,
-			rateLimited: res.status === 429
-		};
+		if (res.status === 401 || res.status === 403) {
+			// Klucz „Sending access” może wysyłać, ale nie czytać szablonów. To stała
+			// cecha klucza, nie awaria — nie pytamy ponownie przez kilka minut.
+			templateReadForbiddenUntil = Date.now() + TEMPLATE_CACHE_MS;
+			failure = { error: forbiddenError, forbidden: true };
+		} else {
+			failure = {
+				error: `Odczyt szablonu Resend ${templateId}: HTTP ${res.status}`,
+				rateLimited: res.status === 429
+			};
+		}
 	} catch (e) {
 		failure = {
 			error: `Odczyt szablonu Resend ${templateId}: ${e instanceof Error ? e.message : String(e)}`

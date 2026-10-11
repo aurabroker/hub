@@ -97,6 +97,13 @@
 		Do tego czasu wiadomości tej kampanii czekają w kolejce — nic nie przepada.
 	</div>
 {/if}
+{#if data.templateForbidden}
+	<div class="alert alert-warning">
+		<strong>Klucz API Resend nie ma prawa odczytu szablonów</strong> (uprawnienie „Sending access”).
+		HUB wysyła, ale nie widzi nadawcy zapisanego w szablonie ani nie sprawdza linku wypisu. Ustaw nadawcę
+		w <a href="/categories">sekcji</a> albo nadaj kluczowi „Full access”.
+	</div>
+{/if}
 {#if data.templateError}
 	<div class="alert alert-error">
 		<strong>Nie udało się odczytać szablonu Resend</strong> ({data.templateError}). Wysyłka czeka, aż

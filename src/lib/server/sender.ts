@@ -488,15 +488,20 @@ export async function sendMessageNow(
 	let templateFrom: string | null = null;
 	if (templateId) {
 		const template = await getResendTemplate(templateId);
-		if (!template.ok) {
+		if (template.ok) {
+			templateFrom = template.info.from;
+			// Marketing bez działającego linku wypisu nie wychodzi: wiadomość czeka
+			// (bez zużycia próby), aż szablon zostanie poprawiony w Resend.
+			if (template.info.deadUnsubscribeLink && opts.queue) {
+				await giveBack(DEAD_UNSUBSCRIBE_HOLD);
+				return { ok: false, error: DEAD_UNSUBSCRIBE_HOLD, held: true };
+			}
+		} else if (template.forbidden) {
+			// Klucz bez prawa odczytu szablonów: wysyłamy jak dawniej (nadawca z kampanii,
+			// sekcji albo RESEND_FROM), bez kontroli szablonu. Panel kampanii o tym ostrzega.
+			console.warn(template.error);
+		} else {
 			return template.rateLimited ? rateLimited(template.error) : fail(template.error);
-		}
-		templateFrom = template.info.from;
-		// Marketing bez działającego linku wypisu nie wychodzi: wiadomość czeka
-		// (bez zużycia próby), aż szablon zostanie poprawiony w Resend.
-		if (template.info.deadUnsubscribeLink && opts.queue) {
-			await giveBack(DEAD_UNSUBSCRIBE_HOLD);
-			return { ok: false, error: DEAD_UNSUBSCRIBE_HOLD, held: true };
 		}
 	}
 	const from = campaign?.from_email || category.from_email || templateFrom || env.RESEND_FROM;
