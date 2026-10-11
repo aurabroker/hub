@@ -12,23 +12,28 @@ interface Env {
 	QUEUE_CRON_SECRET: string;
 }
 
+/**
+ * Nieudane wywołanie kończy się wyjątkiem, nie tylko wpisem w logu: wtedy
+ * statystyki Workera pokazują błąd (status ≠ success). Wcześniej odpowiedź 401
+ * przy złym sekrecie wyglądała w statystykach jak udane uruchomienie.
+ */
 async function call(env: Env, path: string): Promise<void> {
+	let res: Response;
 	try {
-		const res = await fetch(`${env.HUB_URL}${path}`, {
+		res = await fetch(`${env.HUB_URL}${path}`, {
 			method: 'POST',
-			headers: { 'x-cron-secret': env.QUEUE_CRON_SECRET }
+			headers: { 'x-cron-secret': (env.QUEUE_CRON_SECRET ?? '').trim() }
 		});
-		if (!res.ok) {
-			// Bez tego log jest pusty i awaria (np. 401 przy złym sekrecie) przechodzi niezauważona.
-			console.error(`cron ${path} → HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
-		}
 	} catch (e) {
-		console.error(`cron ${path} → błąd sieci: ${e instanceof Error ? e.message : String(e)}`);
+		throw new Error(`cron ${path} → błąd sieci: ${e instanceof Error ? e.message : String(e)}`);
+	}
+	if (!res.ok) {
+		throw new Error(`cron ${path} → HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
 	}
 }
 
 export default {
-	async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-		ctx.waitUntil(call(env, '/api/cron/process-queue?limit=20'));
+	async scheduled(_event: ScheduledController, env: Env): Promise<void> {
+		await call(env, '/api/cron/process-queue?limit=20');
 	}
 };
