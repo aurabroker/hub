@@ -8,11 +8,15 @@ export function secretMatches(provided: string | null | undefined, expected: str
 	return diff === 0;
 }
 
-/** Sekret crona z nagłówka `x-cron-secret` albo `Authorization: Bearer …`. */
+/**
+ * Sekret crona z nagłówka `x-cron-secret` albo `Authorization: Bearer …`.
+ * Bez białych znaków na brzegach — sekret wklejany ręcznie w panelu Cloudflare
+ * łatwo łapie spację albo nową linię, a wtedy każde wywołanie crona dostaje 401.
+ */
 export function cronSecretFrom(request: Request): string | null {
-	return (
+	const raw =
 		request.headers.get('x-cron-secret') ??
 		request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ??
-		null
-	);
+		null;
+	return raw?.trim() || null;
 }

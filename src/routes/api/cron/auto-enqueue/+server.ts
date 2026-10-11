@@ -12,7 +12,7 @@ import type { RequestHandler } from './$types';
  * Chronione tym samym sekretem QUEUE_CRON_SECRET.
  */
 export const POST: RequestHandler = async ({ request }) => {
-	const secret = env.QUEUE_CRON_SECRET;
+	const secret = env.QUEUE_CRON_SECRET?.trim();
 	if (!secret || !secretMatches(cronSecretFrom(request), secret)) {
 		return text('Brak autoryzacji', { status: 401 });
 	}
