@@ -7,7 +7,11 @@
   zamknięciem </body>, potem Publish).
 
   Przed użyciem uzupełnij dane w nawiasach kwadratowych.
-  {{{UNSUBSCRIBE_URL}}} to wbudowana zmienna Resend - zostaw bez zmian.
+  {{{link_wypisu}}} wypełnia HUB (wartość RESEND_UNSUBSCRIBE_URL). NIE używaj
+  {{{RESEND_UNSUBSCRIBE_URL}}} ani {{{UNSUBSCRIBE_URL}}}: Resend wypełnia je tylko
+  w Broadcasts, a HUB wysyła przez API — link wychodził pusty (href="").
+  Zmienną link_wypisu zadeklaruj w szablonie z wartością domyślną (fallback),
+  np. mailto:biuro@auraexpert.pl?subject=Wypis, żeby link nigdy nie był pusty.
 -->
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
 	style="margin-top: 32px; border-top: 1px solid #e2e8f0;">
@@ -27,7 +31,7 @@
 			</p>
 			<p style="margin: 0;">
 				Nie chcesz otrzymywać takich wiadomości?
-				<a href="{{{UNSUBSCRIBE_URL}}}" style="color: #01696f;">Wypisz się jednym kliknięciem</a>.
+				<a href="{{{link_wypisu}}}" style="color: #01696f;">Wypisz się jednym kliknięciem</a>.
 			</p>
 		</td>
 	</tr>

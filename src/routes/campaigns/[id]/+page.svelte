@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
+	import { fmtDateTime } from '$lib/ud/format';
 	import type { ActionData, PageServerData } from './$types';
 
 	let { data, form }: { data: PageServerData; form: ActionData } = $props();
@@ -27,6 +28,13 @@
 	let done = $derived((data.counts.sent ?? 0) + (data.counts.failed ?? 0) + (data.counts.bounced ?? 0));
 	let sendable = $derived(total - (data.counts.skipped ?? 0));
 	let progress = $derived(sendable > 0 ? Math.round((done / sendable) * 100) : 0);
+	let category = $derived(data.campaign.email_categories);
+	let hasContent = $derived(
+		Boolean(category?.resend_template_id) || Boolean(category?.html_body?.trim())
+	);
+	let shownTotal = $derived(
+		data.statusFilter ? (data.counts[data.statusFilter] ?? 0) : total
+	);
 	let busy = $state(false);
 
 	const enhanceBusy = () => {
@@ -46,8 +54,11 @@
 		<p class="page-subtitle">
 			Sekcja: <strong>{data.campaign.email_categories?.name ?? '—'}</strong>
 			· Status: <strong>{statusLabel[data.campaign.status] ?? data.campaign.status}</strong>
+			· Nadawca: <strong>{data.sender.address ?? 'brak!'}</strong>
+			<span class="faint">({data.sender.source})</span>
 			{#if data.campaign.scheduled_at}
-				· Zaplanowana: {new Date(data.campaign.scheduled_at).toLocaleString('pl-PL')}
+				· {data.campaign.status === 'draft' ? 'Termin (po kliknięciu „Zaplanuj”)' : 'Zaplanowana'}:
+				{fmtDateTime(data.campaign.scheduled_at)}
 			{/if}
 		</p>
 	</div>
@@ -61,10 +72,54 @@
 	<div class="alert alert-success">{form.success}</div>
 {/if}
 
-{#if data.campaign.email_categories && !data.campaign.email_categories.resend_template_id}
+{#if data.health.stalled && ['sending', 'scheduled'].includes(data.campaign.status)}
 	<div class="alert alert-warning">
-		Kategoria tej kampanii nie ma ustawionego szablonu Resend —
+		<strong>Kolejka stoi.</strong>
+		{#if data.health.queued > 0}
+			Czeka {data.health.queued} wiadomości, ostatnia wysyłka:
+			{data.health.lastActivityAt ? fmtDateTime(data.health.lastActivityAt) : 'brak'}.
+		{/if}
+		{#if data.health.overdueScheduled > 0}
+			Zaplanowanym kampaniom minął termin, a nie wystartowały.
+		{/if}
+		Automatyczna wysyłka (Worker <span class="mono">aura-hub-queue-cron</span>) nie działa —
+		do czasu naprawy wysyłka idzie tylko ręcznie
+		{#if data.campaign.status === 'scheduled'}(„Uruchom wysyłkę”){:else}(„Przetwórz partię teraz”){/if}.
+	</div>
+{/if}
+
+{#if data.deadUnsubscribeLink}
+	<div class="alert alert-error">
+		<strong>Wysyłka wstrzymana: szablon Resend ma martwy link wypisu.</strong> Używa zmiennej
+		<span class="mono">{'{{{RESEND_UNSUBSCRIBE_URL}}}'}</span>, którą Resend wypełnia tylko w Broadcasts —
+		w mailu z HUB link wychodzi pusty. Zamień ją w szablonie na
+		<span class="mono">{'{{{link_wypisu}}}'}</span> (z wartością domyślną) i opublikuj szablon.
+		Do tego czasu wiadomości tej kampanii czekają w kolejce — nic nie przepada.
+	</div>
+{/if}
+{#if data.templateForbidden}
+	<div class="alert alert-warning">
+		<strong>Klucz API Resend nie ma prawa odczytu szablonów</strong> (uprawnienie „Sending access”).
+		HUB wysyła, ale nie widzi nadawcy zapisanego w szablonie ani nie sprawdza linku wypisu. Ustaw nadawcę
+		w <a href="/categories">sekcji</a> albo nadaj kluczowi „Full access”.
+	</div>
+{/if}
+{#if data.templateError}
+	<div class="alert alert-error">
+		<strong>Nie udało się odczytać szablonu Resend</strong> ({data.templateError}). Wysyłka czeka, aż
+		odczyt się uda — HUB nie wyśle z zastępczego adresu RESEND_FROM.
+	</div>
+{/if}
+
+{#if category && !hasContent}
+	<div class="alert alert-warning">
+		Sekcja tej kampanii nie ma ani szablonu Resend, ani treści z Edytora —
 		<a href="/categories">uzupełnij konfigurację</a> przed startem.
+	</div>
+{:else if category?.html_body?.trim() && !data.campaign.subject && !category.subject}
+	<div class="alert alert-warning">
+		Sekcja ma treść z Edytora, ale nie ma tematu — każda wiadomość skończy się błędem.
+		Ustaw temat kampanii albo sekcji przed startem.
 	</div>
 {/if}
 
@@ -75,7 +130,9 @@
 			W segmencie: <strong>{data.preview.total}</strong> · do wysyłki:
 			<strong style="color: var(--color-success)">{data.preview.queued}</strong> · brak zgody RODO:
 			<strong style="color: var(--color-warning)">{data.preview.skippedNoConsent}</strong> · zły e-mail:
-			<strong>{data.preview.skippedBadEmail}</strong> · wykluczeni trybem:
+			<strong>{data.preview.skippedBadEmail}</strong> · ten sam adres na kilku kartach (wyślemy raz):
+			<strong>{data.preview.skippedDuplicate}</strong> · zablokowane (odbicie / skarga):
+			<strong>{data.preview.skippedBlocked}</strong> · wykluczeni trybem:
 			<strong>{data.preview.excludedByMode}</strong>
 		</p>
 		{#if data.preview.queued === 0 && data.preview.skippedNoConsent > 0}
@@ -122,7 +179,12 @@
 {#if total > 0}
 	<div class="card">
 		<div style="display: flex; justify-content: space-between; margin-bottom: var(--space-2); font-size: var(--text-sm)">
-			<span>Postęp wysyłki: {done} / {sendable} ({progress}%)</span>
+			<span>
+				Postęp wysyłki: {done} / {sendable} ({progress}%)
+				{#if (data.counts.queued ?? 0) > 0 && !data.health.stalled}
+					· cała kolejka ({data.health.queued}) zejdzie w ok. {data.health.etaMinutes} min
+				{/if}
+			</span>
 			<span class="muted">
 				w kolejce {data.counts.queued ?? 0} · wysłane {data.counts.sent ?? 0} · błędy
 				{(data.counts.failed ?? 0) + (data.counts.bounced ?? 0)} · pominięte {data.counts.skipped ?? 0}
@@ -179,9 +241,9 @@
 						<td><span class="badge {messageBadge[m.status] ?? 'badge-muted'}">{m.status}</span></td>
 						<td class="muted" style="max-width: 280px">{m.error ?? ''}</td>
 						<td class="num">{m.attempts}</td>
-						<td class="muted">{m.sent_at ? new Date(m.sent_at).toLocaleString('pl-PL') : '—'}</td>
-						<td class="muted">{m.opened_at ? new Date(m.opened_at).toLocaleString('pl-PL') : '—'}</td>
-						<td class="muted">{m.clicked_at ? new Date(m.clicked_at).toLocaleString('pl-PL') : '—'}</td>
+						<td class="muted">{m.sent_at ? fmtDateTime(m.sent_at) : '—'}</td>
+						<td class="muted">{m.opened_at ? fmtDateTime(m.opened_at) : '—'}</td>
+						<td class="muted">{m.clicked_at ? fmtDateTime(m.clicked_at) : '—'}</td>
 					</tr>
 				{:else}
 					<tr>
@@ -193,4 +255,9 @@
 			</tbody>
 		</table>
 	</div>
+	{#if shownTotal > data.messages.length}
+		<p class="muted" style="font-size: var(--text-sm); padding: var(--space-3)">
+			Pokazano pierwszych {data.messages.length} z {shownTotal}. Liczniki i postęp obejmują wszystkich.
+		</p>
+	{/if}
 </div>

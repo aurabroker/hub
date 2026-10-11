@@ -344,7 +344,7 @@
 <div class="alert alert-warning" style="margin-top: var(--space-5)">
 	<strong>Personalizacja:</strong> <span class="mono">{'{{firma}}'}</span>,
 	<span class="mono">{'{{kontakt}}'}</span>, <span class="mono">{'{{miasto}}'}</span>,
-	<span class="mono">{'{{nip}}'}</span>, wypis <span class="mono">{'{{{UNSUBSCRIBE_URL}}}'}</span>.
+	<span class="mono">{'{{nip}}'}</span>, wypis <span class="mono">{'{{{link_wypisu}}}'}</span>.
 	<br />
 	<strong>Zapisz draft</strong> = odłóż wersję roboczą (nie wpływa na wysyłkę).
 	<strong>Zastosuj do sekcji</strong> = od tej chwili wysyłki tej sekcji używają tej treści.

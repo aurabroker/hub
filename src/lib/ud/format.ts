@@ -22,8 +22,11 @@ export function isSameDay(iso: string, other: string): boolean {
 	return dayKey(iso) === other;
 }
 
+// Strefa podana wprost: serwer (Cloudflare) renderuje w UTC, więc bez niej
+// godziny w HTML-u z SSR były przesunięte o 1–2 h względem Warszawy.
 export function fmtDateTime(iso: string): string {
 	return new Date(iso).toLocaleString('pl-PL', {
+		timeZone: 'Europe/Warsaw',
 		day: '2-digit',
 		month: '2-digit',
 		year: 'numeric',
@@ -34,6 +37,7 @@ export function fmtDateTime(iso: string): string {
 
 export function fmtDate(iso: string): string {
 	return new Date(iso).toLocaleDateString('pl-PL', {
+		timeZone: 'Europe/Warsaw',
 		day: '2-digit',
 		month: '2-digit',
 		year: 'numeric'

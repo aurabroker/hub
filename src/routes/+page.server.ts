@@ -1,4 +1,5 @@
 import { adminClient } from '$lib/server/supabase';
+import { startOfWarsawDayIso } from '$lib/warsaw';
 import type { PageServerLoad } from './$types';
 
 function daysAgoIso(days: number): string {
@@ -7,10 +8,9 @@ function daysAgoIso(days: number): string {
 	return d.toISOString();
 }
 
+/** „Dziś” w panelu = doba warszawska (serwer Cloudflare liczy w UTC). */
 function startOfTodayIso(): string {
-	const d = new Date();
-	d.setHours(0, 0, 0, 0);
-	return d.toISOString();
+	return startOfWarsawDayIso();
 }
 
 export const load: PageServerLoad = async () => {

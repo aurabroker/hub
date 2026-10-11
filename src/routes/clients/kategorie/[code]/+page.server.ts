@@ -1,5 +1,5 @@
 import { error, fail } from '@sveltejs/kit';
-import { adminClient } from '$lib/server/supabase';
+import { adminClient, fetchAllRows } from '$lib/server/supabase';
 import { dailySendStatus, enqueueCategoryBlast } from '$lib/server/sender';
 import {
 	CANONICAL_CODES,
@@ -24,7 +24,20 @@ export const load: PageServerLoad = async ({ params }) => {
 			.eq('code', code)
 			.eq('active', true)
 			.maybeSingle(),
-		db.from('crm_companies').select('*').order('created_at', { ascending: false, nullsFirst: false }),
+		// Stronami (db_max_rows = 1000): jedno zapytanie oddawało tylko 1000 najnowszych
+		// kontaktów całej bazy, więc lista kategorii gubiła starsze kontakty.
+		fetchAllRows<CrmCompany>(
+			(from, to) =>
+				db
+					.from('crm_companies')
+					.select('*')
+					.order('created_at', { ascending: false, nullsFirst: false })
+					.order('id', { ascending: false })
+					.range(from, to),
+			'crm_companies'
+		)
+			.then((data) => ({ data, error: null as { message: string } | null }))
+			.catch((e: Error) => ({ data: [] as CrmCompany[], error: { message: e.message } })),
 		dailySendStatus(db)
 	]);
 

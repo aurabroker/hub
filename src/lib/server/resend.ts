@@ -15,12 +15,20 @@ export interface ResendSendArgs {
 	variables?: Record<string, string>;
 	html?: string;
 	attachments?: ResendAttachment[];
+	/**
+	 * Klucz idempotencji (nagłówek `Idempotency-Key`, ważny w Resend 24 h).
+	 * Ponowienie z tym samym kluczem i tą samą treścią zwraca pierwotną
+	 * odpowiedź zamiast wysyłać drugiego maila.
+	 */
+	idempotencyKey?: string;
 }
 
 export interface ResendSendResult {
 	ok: boolean;
 	id?: string;
 	error?: string;
+	/** 429: Resend nic nie wysłał, bo przekroczono limit zapytań — to nie wina wiadomości. */
+	rateLimited?: boolean;
 }
 
 /**
@@ -29,7 +37,9 @@ export interface ResendSendResult {
  * Każdy mail marketingowy dostaje nagłówek List-Unsubscribe.
  */
 export async function sendResendEmail(args: ResendSendArgs): Promise<ResendSendResult> {
-	if (!env.RESEND_API_KEY) return { ok: false, error: 'Brak RESEND_API_KEY w środowisku' };
+	if (!env.RESEND_API_KEY) {
+		return { ok: false, error: 'Brak RESEND_API_KEY w środowisku' };
+	}
 
 	const headers: Record<string, string> = {};
 	if (env.RESEND_UNSUBSCRIBE_URL) {
@@ -53,14 +63,17 @@ export async function sendResendEmail(args: ResendSendArgs): Promise<ResendSendR
 		return { ok: false, error: 'Kategoria nie ma szablonu Resend ani treści HTML' };
 	}
 
+	const requestHeaders: Record<string, string> = {
+		Authorization: `Bearer ${env.RESEND_API_KEY}`,
+		'Content-Type': 'application/json'
+	};
+	if (args.idempotencyKey) requestHeaders['Idempotency-Key'] = args.idempotencyKey;
+
 	let res: Response;
 	try {
 		res = await fetch('https://api.resend.com/emails', {
 			method: 'POST',
-			headers: {
-				Authorization: `Bearer ${env.RESEND_API_KEY}`,
-				'Content-Type': 'application/json'
-			},
+			headers: requestHeaders,
 			body: JSON.stringify(body)
 		});
 	} catch (e) {
@@ -75,11 +88,82 @@ export async function sendResendEmail(args: ResendSendArgs): Promise<ResendSendR
 		} catch {
 			// treść błędu nie była JSON-em
 		}
-		return { ok: false, error: message };
+		return { ok: false, error: message, rateLimited: res.status === 429 };
 	}
 
 	const data = (await res.json()) as { id: string };
 	return { ok: true, id: data.id };
+}
+
+export interface ResendTemplateInfo {
+	/** Nadawca zapisany w szablonie (null = szablon go nie ma). */
+	from: string | null;
+	/** Szablon nadal linkuje wypis przez zmienną, którą Resend wypełnia tylko w Broadcasts. */
+	deadUnsubscribeLink: boolean;
+}
+
+/** Pamięć szablonów w obrębie izolatu — szablon zmienia się rzadko. */
+const templateCache = new Map<string, { info: ResendTemplateInfo; expires: number }>();
+const TEMPLATE_CACHE_MS = 5 * 60_000;
+/** Do kiedy nie pytamy o szablony, bo klucz API nie ma prawa ich czytać (401/403). */
+let templateReadForbiddenUntil = 0;
+
+/**
+ * Odczyt szablonu Resend (GET /templates/:id). Przy błędzie API zwraca ostatnią
+ * znaną wersję, nawet przeterminowaną; bez niej — `ok: false`. Wywołujący NIE
+ * może wtedy po cichu wysłać z RESEND_FROM, bo to dokładnie ten błąd, w którym
+ * newsletter jednej marki wychodził z adresu innej.
+ */
+export async function getResendTemplate(
+	templateId: string
+): Promise<
+	| { ok: true; info: ResendTemplateInfo }
+	| { ok: false; error: string; rateLimited?: boolean; forbidden?: boolean }
+> {
+	if (!env.RESEND_API_KEY) return { ok: false, error: 'Brak RESEND_API_KEY w środowisku' };
+	const cached = templateCache.get(templateId);
+	if (cached && cached.expires > Date.now()) return { ok: true, info: cached.info };
+	const forbiddenError = 'Klucz API Resend nie ma prawa odczytu szablonów (tylko wysyłka)';
+	if (templateReadForbiddenUntil > Date.now()) {
+		return { ok: false, error: forbiddenError, forbidden: true };
+	}
+
+	let failure: { error: string; rateLimited?: boolean; forbidden?: boolean };
+	try {
+		const res = await fetch(`https://api.resend.com/templates/${encodeURIComponent(templateId)}`, {
+			headers: { Authorization: `Bearer ${env.RESEND_API_KEY}` }
+		});
+		if (res.ok) {
+			const data = (await res.json()) as { from?: string | null; html?: string | null };
+			const html = data.html ?? '';
+			const info: ResendTemplateInfo = {
+				from: typeof data.from === 'string' && data.from.trim() ? data.from.trim() : null,
+				// Każde wystąpienie się liczy — obok działającego {{{link_wypisu}}} może stać
+				// drugi, pusty link („Zarządzaj subskrypcją”).
+				deadUnsubscribeLink: /RESEND_UNSUBSCRIBE_URL|\{\{\{?\s*UNSUBSCRIBE_URL/.test(html)
+			};
+			templateCache.set(templateId, { info, expires: Date.now() + TEMPLATE_CACHE_MS });
+			return { ok: true, info };
+		}
+		if (res.status === 401 || res.status === 403) {
+			// Klucz „Sending access” może wysyłać, ale nie czytać szablonów. To stała
+			// cecha klucza, nie awaria — nie pytamy ponownie przez kilka minut.
+			templateReadForbiddenUntil = Date.now() + TEMPLATE_CACHE_MS;
+			failure = { error: forbiddenError, forbidden: true };
+		} else {
+			failure = {
+				error: `Odczyt szablonu Resend ${templateId}: HTTP ${res.status}`,
+				rateLimited: res.status === 429
+			};
+		}
+	} catch (e) {
+		failure = {
+			error: `Odczyt szablonu Resend ${templateId}: ${e instanceof Error ? e.message : String(e)}`
+		};
+	}
+	if (cached) return { ok: true, info: cached.info };
+	console.error(failure.error);
+	return { ok: false, ...failure };
 }
 
 /**
@@ -107,4 +191,3 @@ export async function getResendEmail(
 	const data = (await res.json()) as { last_event?: string };
 	return { ok: true, lastEvent: data.last_event };
 }
-

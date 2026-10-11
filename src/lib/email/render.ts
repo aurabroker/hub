@@ -40,7 +40,8 @@ ${inner || '<p style="color:#94a3b8">Treść e-maila…</p>'}
  * Buduje finalny HTML maila: szkielet + podstawienie zmiennych.
  * - `{{firma}}`, `{{kontakt}}`, `{{miasto}}`, `{{nip}}` (i inne z `vars`) — escapowane,
  * - `{{{pliki_html}}}` — surowy HTML listy plików (tryb „links"),
- * - `{{{UNSUBSCRIBE_URL}}}` — link wypisu.
+ * - `{{{link_wypisu}}}` — link wypisu (ta sama nazwa co w szablonach Resend);
+ *   `{{{UNSUBSCRIBE_URL}}}` zostaje jako dawny alias.
  */
 export function renderEmailHtml(
 	inner: string,
@@ -57,7 +58,9 @@ export function renderEmailHtml(
 	html = html.split('{{{pliki_html}}}').join(pliki).split('{{pliki_html}}').join(pliki);
 
 	const unsub = escapeHtmlValue(opts.unsubscribeUrl ?? '');
-	html = html.split('{{{UNSUBSCRIBE_URL}}}').join(unsub).split('{{UNSUBSCRIBE_URL}}').join(unsub);
+	for (const name of ['link_wypisu', 'UNSUBSCRIBE_URL']) {
+		html = html.split(`{{{${name}}}}`).join(unsub).split(`{{${name}}}`).join(unsub);
+	}
 
 	return html;
 }

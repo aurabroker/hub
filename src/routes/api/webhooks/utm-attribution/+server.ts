@@ -1,6 +1,7 @@
 import { json, text } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { adminClient } from '$lib/server/supabase';
+import { secretMatches } from '$lib/server/secrets';
 import { slugifyUtm } from '$lib/utm';
 import type { RequestHandler } from './$types';
 
@@ -31,16 +32,6 @@ interface AttributionPayload {
 	gclid?: string;
 	fbclid?: string;
 	first_seen_at?: string;
-}
-
-/** Porównanie odporne na pomiar czasu — sekret nie może wyciec bajt po bajcie. */
-function secretMatches(provided: string | null, expected: string): boolean {
-	if (!provided || provided.length !== expected.length) return false;
-	let diff = 0;
-	for (let i = 0; i < expected.length; i++) {
-		diff |= provided.charCodeAt(i) ^ expected.charCodeAt(i);
-	}
-	return diff === 0;
 }
 
 function clean(value: unknown, max = 500): string | null {

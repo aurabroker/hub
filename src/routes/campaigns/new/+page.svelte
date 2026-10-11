@@ -49,6 +49,14 @@
 				<div class="kpi-value">{form.preview.skippedBadEmail}</div>
 			</div>
 			<div class="kpi-card">
+				<div class="kpi-label">Ten sam adres na kilku kartach (wyślemy raz)</div>
+				<div class="kpi-value">{form.preview.skippedDuplicate}</div>
+			</div>
+			<div class="kpi-card">
+				<div class="kpi-label">Zablokowane — wcześniejsze odbicie / skarga</div>
+				<div class="kpi-value">{form.preview.skippedBlocked}</div>
+			</div>
+			<div class="kpi-card">
 				<div class="kpi-label">Wykluczeni (tryb odbiorców)</div>
 				<div class="kpi-value">{form.preview.excludedByMode}</div>
 			</div>
@@ -85,7 +93,7 @@
 			<input class="form-input" id="subject" name="subject" value={values?.subject ?? ''} />
 		</div>
 		<div class="form-field">
-			<label class="form-label" for="from_email">Nadawca (puste = z kategorii / RESEND_FROM)</label>
+			<label class="form-label" for="from_email">Nadawca (puste = z sekcji, potem z szablonu Resend)</label>
 			<input class="form-input" id="from_email" name="from_email" value={values?.from_email ?? ''} />
 		</div>
 	</div>
@@ -156,7 +164,9 @@
 			</select>
 		</div>
 		<div class="form-field">
-			<label class="form-label" for="scheduled_at">Zaplanuj na (puste = start ręczny)</label>
+			<label class="form-label" for="scheduled_at">
+				Zaplanuj na — czas warszawski (puste = start ręczny; termin zadziała po kliknięciu „Zaplanuj wysyłkę” w kampanii)
+			</label>
 			<input
 				class="form-input"
 				id="scheduled_at"
