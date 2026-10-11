@@ -549,10 +549,12 @@ export async function sendMessageNow(
 			templateId,
 			// link_wypisu: Resend NIE wypełnia {{{RESEND_UNSUBSCRIBE_URL}}} przy wysyłce
 			// przez API (tylko w Broadcasts), więc szablon musi używać tej zmiennej.
+			// Bez RESEND_UNSUBSCRIBE_URL zmiennej nie wysyłamy wcale — pusty tekst
+			// przykryłby wartość domyślną zadeklarowaną w szablonie i link byłby pusty.
 			variables: {
 				...messageVars,
 				...fileVariables,
-				link_wypisu: env.RESEND_UNSUBSCRIBE_URL ?? ''
+				...(env.RESEND_UNSUBSCRIBE_URL ? { link_wypisu: env.RESEND_UNSUBSCRIBE_URL } : {})
 			},
 			attachments,
 			idempotencyKey
