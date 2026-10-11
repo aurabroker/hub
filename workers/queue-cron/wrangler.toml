@@ -2,9 +2,11 @@ name = "aura-hub-queue-cron"
 main = "index.ts"
 compatibility_date = "2026-06-01"
 
-# Co 2 minuty przetwarza partię kolejki wysyłki
+# Co minutę przetwarza partię kolejki wysyłki (20 maili ≈ 1200/h).
+# Partia trwa ok. 30 s, a równoległe przebiegi i tak nie zdublują maila
+# (atomowe przejęcie + klucz idempotencji w Resend).
 [triggers]
-crons = ["*/2 * * * *"]
+crons = ["* * * * *"]
 
 [vars]
 # Publiczny adres aplikacji Aura HUB (Cloudflare Pages)

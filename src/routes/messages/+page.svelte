@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { fmtDateTime } from '$lib/ud/format';
 	import type { ActionData, PageServerData } from './$types';
 
 	let { data, form }: { data: PageServerData; form: ActionData } = $props();
@@ -15,7 +16,7 @@
 	};
 
 	function fmt(iso: string | null): string {
-		return iso ? new Date(iso).toLocaleString('pl-PL') : '—';
+		return iso ? fmtDateTime(iso) : '—';
 	}
 
 	let total = $derived(Object.values(data.counts).reduce((a, b) => a + b, 0));
@@ -28,6 +29,38 @@
 	Log wszystkich maili ({total} łącznie): szybka wysyłka i kampanie. Otwarcia/kliknięcia
 	uzupełniają się po zdarzeniach z webhooka Resend.
 </p>
+
+{#if data.health.queued > 0}
+	<div
+		class="card"
+		style="display: flex; gap: var(--space-3); align-items: center; justify-content: space-between; flex-wrap: wrap"
+	>
+		<div>
+			<strong style="font-size: var(--text-sm)">
+				W kolejce: {data.health.queued}
+				{#if data.health.stalled}— kolejka stoi{/if}
+			</strong>
+			<div class="faint" style="margin-top: 4px">
+				Ostatnia wysyłka: {fmt(data.health.lastActivityAt)}.
+				{#if data.health.stalled}
+					Automatyczna wysyłka (Worker <span class="mono">aura-hub-queue-cron</span>) nie działa, więc
+					kampanie, automat i wysyłki „do wszystkich” ruszają tylko tym przyciskiem.
+				{:else}
+					Przy działającym cronie kolejka opróżni się w ok. {data.health.etaMinutes} min.
+				{/if}
+			</div>
+		</div>
+		<form method="POST" action="?/process" use:enhance={() => { busy = true; return async ({ update }) => { busy = false; await update({ reset: false }); }; }}>
+			<button class="btn btn-primary" type="submit" disabled={busy}>
+				{busy ? 'Wysyłanie…' : 'Przetwórz kolejkę (20)'}
+			</button>
+		</form>
+	</div>
+{/if}
+
+{#if form?.processed}
+	<div class="alert alert-success">{form.processed}</div>
+{/if}
 
 {#if form?.backfill}
 	{@const b = form.backfill}

@@ -33,6 +33,7 @@
 		{#if form.blast.skippedNoConsent > 0}· pominięto {form.blast.skippedNoConsent} bez zgody RODO{/if}
 		{#if form.blast.skippedBadEmail > 0}· {form.blast.skippedBadEmail} z błędnym e-mailem{/if}
 		{#if form.blast.skippedDuplicate > 0}· {form.blast.skippedDuplicate} już obsłużonych{/if}
+		{#if form.blast.skippedBlocked > 0}· {form.blast.skippedBlocked} zablokowanych (odbicie / skarga){/if}
 	</div>
 {/if}
 

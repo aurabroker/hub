@@ -88,15 +88,36 @@ jest wpis `crm_history` (`type='email'`). Migracja dotyczy wyłącznie modułu e
 ## Pipeline wysyłki masowej
 
 1. Kampania (szkic) z kategorią i segmentem (`segment_json`).
-2. Start → **materializacja** `email_messages`: poprawny e-mail **i zgoda RODO** → `queued`,
-   reszta → `skipped` z powodem; snapshot załączników w `email_attachments`;
-   idempotencja przez unikalny indeks `(campaign_id, company_id)`.
-3. Worker cron (`workers/queue-cron`) co 2 min woła `POST /api/cron/process-queue`
-   (nagłówek `x-cron-secret`); endpoint wysyła partię **pojedynczo** przez Resend
-   (załączniki wykluczają batch), z throttlingiem ~650 ms/mail i retry z powrotem do
-   kolejki (maks. 3 próby → `failed`).
-4. Zaplanowane kampanie (`scheduled_at`) uruchamia ten sam cron.
-5. Partię można też przetworzyć ręcznie z dashboardu kampanii.
+2. Start → **materializacja** `email_messages`. Do `queued` trafia kontakt z poprawnym
+   e-mailem, bez sprzeciwu RODO, bez wcześniejszego twardego odbicia ani skargi na spam
+   (`loadBlockedEmails`) i **pierwszy raz w tej wysyłce po adresie** — ta sama osoba bywa
+   w CRM na kilku kartach, a unikalny indeks `(campaign_id, company_id)` tego nie łapał.
+   Reszta → `skipped` z powodem; snapshot załączników w `email_attachments`.
+3. Worker cron (`workers/queue-cron`) **co minutę** woła `POST /api/cron/process-queue`
+   (nagłówek `x-cron-secret`); endpoint wysyła partię 20 maili **pojedynczo** przez Resend
+   (załączniki wykluczają batch), z throttlingiem `SEND_DELAY_MS` (domyślnie 650 ms)
+   i retry z powrotem do kolejki (maks. 3 próby → `failed`). Kolejność: automat
+   (świeże zapisy) → kampanie → wysyłki „do wszystkich”.
+4. Zaplanowane kampanie (`scheduled_at`, czas warszawski) i automat uruchamia ten sam cron.
+5. Partię można też przetworzyć ręcznie: przycisk na stronie kampanii albo
+   „Przetwórz kolejkę” w Historii wysyłek (cała kolejka, także bez kampanii).
+
+> ### ⚠️ Bez crona nic nie wychodzi samo
+>
+> Kampanie, automat, wysyłki „do wszystkich” i start zaplanowanych kampanii działają
+> **wyłącznie** przez Worker `aura-hub-queue-cron`. Do 2026-10-11 tego Workera nie było na
+> koncie Cloudflare — wysyłka szła tylko wtedy, gdy ktoś klikał „Przetwórz partię”.
+> Panel pokazuje teraz „Kolejka stoi”, gdy kolejka nie jest pusta, a od 10 minut nic
+> z niej nie wyszło. Wdrożenie: sekcja „Deploy” niżej.
+
+> ### Duplikaty i awarie
+>
+> Każde wywołanie Resend niesie nagłówek `Idempotency-Key` (`aura-hub/{id}/{próba}`).
+> Gdy funkcja padnie po wysyłce, a przed zapisem statusu, wiadomość zostaje w `sending`;
+> po 15 min wraca do kolejki **z oddaną próbą**, więc z tym samym kluczem, a Resend zamiast
+> drugiego maila zwraca pierwotną odpowiedź. Klucz żyje 24 h — starsze zawieszone
+> wiadomości dostają `failed` z prośbą o sprawdzenie w Resend. Odpowiedź 429 nie zużywa
+> próby i przerywa partię.
 
 ## Resend — konfiguracja
 
@@ -113,10 +134,21 @@ jest wpis `crm_history` (`type='email'`). Migracja dotyczy wyłącznie modułu e
    > Tracking działa **per-domena**; API `POST /emails` nie ma pola `track_opens` — nie da
    > się go włączyć per-wiadomość z poziomu kodu.
 3. Utwórz szablony (Templates) i wpisz ich id/alias w `/categories`. W treści użyj
-   zmiennych `{{firma}}`, `{{kontakt}}`, `{{miasto}}`, `{{nip}}` oraz **wbudowanej**
-   `{{{UNSUBSCRIBE_URL}}}` jako linku wypisu.
+   zmiennych `{{firma}}`, `{{kontakt}}`, `{{miasto}}`, `{{nip}}` oraz `{{{link_wypisu}}}`
+   jako linku wypisu (HUB wstawia tam `RESEND_UNSUBSCRIBE_URL`). Zadeklaruj ją w szablonie
+   z wartością domyślną, np. `mailto:` na monitorowaną skrzynkę.
+
+   > ⚠️ **`{{{RESEND_UNSUBSCRIBE_URL}}}` nie działa przy wysyłce z HUB.** Resend wypełnia ją
+   > tylko w Broadcasts; HUB wysyła przez `POST /emails`, więc link wychodził jako `href=""`
+   > (sprawdzone na newsletterze z 2026-10-11).
+
+   **Nadawca:** kampania → sekcja (`/categories`) → nadawca zapisany w szablonie Resend →
+   `RESEND_FROM`. Wcześniej `RESEND_FROM` wygrywał z szablonem, więc newsletter
+   UtrataDochodu wychodził jako „Beauty❤️Polisa”.
 4. Webhook: endpoint `POST /api/webhooks/resend`, subskrybuj `email.delivered`,
-   `email.opened`, `email.clicked`, `email.bounced`, `email.complained`.
+   `email.opened`, `email.clicked`, `email.bounced`, `email.complained`, a także
+   `email.suppressed` i `email.failed` — bez nich mail zablokowany przez Resend
+   zostaje w HUB jako „wysłany”.
    Podpis (Svix) jest weryfikowany sekretem `RESEND_WEBHOOK_SECRET` — zdarzenia bez
    poprawnego podpisu są odrzucane.
 5. Każdy mail dostaje nagłówki `List-Unsubscribe` / `List-Unsubscribe-Post`
@@ -349,8 +381,11 @@ reguł, które łatwo złamać przy dokładaniu kolejnego ekranu.
 
 1. Aplikacja: Cloudflare Pages z adapterem `@sveltejs/adapter-cloudflare`;
    ustaw zmienne środowiskowe z `.env.example` w projekcie Pages.
-2. Cron: `cd workers/queue-cron && wrangler deploy`, ustaw `HUB_URL` w `wrangler.toml`
-   i sekret `wrangler secret put QUEUE_CRON_SECRET` (ta sama wartość co w aplikacji).
+2. Cron: `cd workers/queue-cron && npx wrangler deploy`, ustaw `HUB_URL` w `wrangler.toml`
+   i sekret `npx wrangler secret put QUEUE_CRON_SECRET` (ta sama wartość co w aplikacji).
+   Sprawdzenie, że działa: `npx wrangler tail aura-hub-queue-cron` (co minutę wpis,
+   bez `HTTP 401`) i znika ostrzeżenie „Kolejka stoi” w panelu.
+   Sekret generuj losowo (`openssl rand -hex 32`) i nigdy nie wpisuj go do repozytorium.
 
 > Uwaga do wdrożeń: przywracanie/aktualizacja produkcji dotyczy **wyłącznie kodu aplikacji**.
 > Konfiguracja **autoryzacji i weryfikacji Supabase pozostaje nietknięta** (patrz sekcja

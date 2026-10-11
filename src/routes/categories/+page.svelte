@@ -11,12 +11,15 @@
 <h1 class="page-title">Kategorie wysyłki</h1>
 <p class="page-subtitle">
 	Sekcje = „co wysyłamy”. Każda kategoria ma szablon Resend, temat, nadawcę i domyślne pliki
-	(przypinane w bibliotece) — wysyłane jako załączniki albo linki do pobrania. W szablonie Resend
-	użyj wbudowanej zmiennej <span class="mono">{'{{{UNSUBSCRIBE_URL}}}'}</span> jako linku wypisu,
-	zmiennych <span class="mono">{'{{firma}}'}</span>, <span class="mono">{'{{kontakt}}'}</span>,
-	<span class="mono">{'{{miasto}}'}</span>, <span class="mono">{'{{nip}}'}</span>, a w trybie
-	linków wstaw <span class="mono">{'{{{pliki_html}}}'}</span> tam, gdzie ma się pojawić lista
-	plików. Gotowa stopka do wklejenia: <span class="mono">docs/email-footer.html</span> w repo.
+	(przypinane w bibliotece) — wysyłane jako załączniki albo linki do pobrania. Puste pole
+	„Nadawca” = nadawca zapisany w szablonie Resend. W szablonie użyj zmiennych
+	<span class="mono">{'{{firma}}'}</span>, <span class="mono">{'{{kontakt}}'}</span>,
+	<span class="mono">{'{{miasto}}'}</span>, <span class="mono">{'{{nip}}'}</span> i linku wypisu
+	<span class="mono">{'{{{link_wypisu}}}'}</span> (wbudowana
+	<span class="mono">{'{{{RESEND_UNSUBSCRIBE_URL}}}'}</span> działa tylko w Broadcasts — przy
+	wysyłce z HUB link wychodzi pusty), a w trybie linków wstaw
+	<span class="mono">{'{{{pliki_html}}}'}</span> tam, gdzie ma się pojawić lista plików. Gotowa
+	stopka do wklejenia: <span class="mono">docs/email-footer.html</span> w repo.
 </p>
 
 {#if form?.error}

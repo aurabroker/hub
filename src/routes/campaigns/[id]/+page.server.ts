@@ -1,13 +1,24 @@
 import { error, fail } from '@sveltejs/kit';
-import { materializeCampaign, previewAudience, processQueue, type SegmentFilters } from '$lib/server/sender';
+import {
+	CANCELED_REASON,
+	closeFinishedCampaigns,
+	materializeCampaign,
+	previewAudience,
+	processQueue,
+	queueHealth,
+	type SegmentFilters
+} from '$lib/server/sender';
 import { adminClient } from '$lib/server/supabase';
 import type { Actions, PageServerLoad } from './$types';
+
+const MESSAGE_STATUSES = ['queued', 'sending', 'sent', 'failed', 'bounced', 'skipped'] as const;
+const RECIPIENTS_LIMIT = 500;
 
 export const load: PageServerLoad = async ({ params, url }) => {
 	const db = adminClient();
 	const { data: campaign } = await db
 		.from('email_campaigns')
-		.select('*, email_categories ( code, name, resend_template_id )')
+		.select('*, email_categories ( code, name, resend_template_id, html_body, subject, from_email )')
 		.eq('id', params.id)
 		.maybeSingle();
 	if (!campaign) error(404, 'Nie znaleziono kampanii');
@@ -18,18 +29,28 @@ export const load: PageServerLoad = async ({ params, url }) => {
 		.select('id, to_email, company_id, status, error, attempts, sent_at, opened_at, clicked_at, resend_id')
 		.eq('campaign_id', params.id)
 		.order('created_at', { ascending: true })
-		.limit(500);
+		.limit(RECIPIENTS_LIMIT);
 	if (statusFilter) messagesQuery = messagesQuery.eq('status', statusFilter);
 
-	const [{ data: messages }, { data: allStatuses }] = await Promise.all([
+	// Liczniki jako zapytania COUNT: pobranie wierszy i liczenie w pamięci ucinało
+	// się na 1000 (db_max_rows), więc kampania na 1385 adresów pokazywała zły postęp.
+	const countFor = (status: string) =>
+		db
+			.from('email_messages')
+			.select('id', { count: 'exact', head: true })
+			.eq('campaign_id', params.id)
+			.eq('status', status);
+	const [{ data: messages }, health, ...countResults] = await Promise.all([
 		messagesQuery,
-		db.from('email_messages').select('status').eq('campaign_id', params.id)
+		queueHealth(db),
+		...MESSAGE_STATUSES.map(countFor)
 	]);
 
 	const counts: Record<string, number> = {};
-	for (const m of allStatuses ?? []) {
-		counts[m.status as string] = (counts[m.status as string] ?? 0) + 1;
-	}
+	MESSAGE_STATUSES.forEach((status, i) => {
+		const n = countResults[i].count ?? 0;
+		if (n > 0) counts[status] = n;
+	});
 
 	let preview = null;
 	if (campaign.status === 'draft') {
@@ -41,7 +62,15 @@ export const load: PageServerLoad = async ({ params, url }) => {
 		);
 	}
 
-	return { campaign, messages: messages ?? [], counts, statusFilter, preview };
+	return {
+		campaign,
+		messages: messages ?? [],
+		recipientsLimit: RECIPIENTS_LIMIT,
+		counts,
+		statusFilter,
+		preview,
+		health
+	};
 };
 
 export const actions: Actions = {
@@ -68,6 +97,8 @@ export const actions: Actions = {
 
 		const { queued, skipped } = await materializeCampaign(db, params.id);
 		await db.from('email_campaigns').update({ status: 'sending' }).eq('id', params.id);
+		// Kampania bez nikogo w kolejce od razu dostaje status końcowy.
+		await closeFinishedCampaigns(db);
 		return {
 			success: `Zmaterializowano odbiorców: ${queued} w kolejce, ${skipped} pominiętych. Wysyłka ruszy z kolejnymi partiami crona (albo przetwórz partię ręcznie).`
 		};
@@ -77,7 +108,7 @@ export const actions: Actions = {
 	process: async ({ url }) => {
 		const result = await processQueue(adminClient(), url.origin, 20);
 		return {
-			success: `Partia przetworzona: wysłane ${result.sent}, błędy ${result.failed}, ponowienia ${result.requeued}`
+			success: `Partia przetworzona: wysłane ${result.sent}, błędy ${result.failed}, ponowienia ${result.requeued}${result.rateLimited ? ' (Resend: limit zapytań — reszta w kolejnej partii)' : ''}`
 		};
 	},
 
@@ -103,7 +134,7 @@ export const actions: Actions = {
 		const db = adminClient();
 		await db
 			.from('email_messages')
-			.update({ status: 'skipped', error: 'Kampania anulowana' })
+			.update({ status: 'skipped', error: CANCELED_REASON })
 			.eq('campaign_id', params.id)
 			.eq('status', 'queued');
 		await db.from('email_campaigns').update({ status: 'canceled' }).eq('id', params.id);

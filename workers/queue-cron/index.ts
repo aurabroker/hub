@@ -1,10 +1,11 @@
 /**
- * Worker-cron: cyklicznie odpala przetwarzanie kolejki wysyłki Aura HUB
- * oraz kolejkowanie automatycznej wysyłki (nowe zapisy).
- * Endpointy sam pilnują throttlingu, limitów partii i limitu dobowego.
+ * Worker-cron: co minutę odpala przetwarzanie kolejki wysyłki Aura HUB.
+ * Endpoint sam pilnuje throttlingu, limitów partii i limitu dobowego, a przy
+ * okazji kolejkuje automat (nowe zapisy) i startuje zaplanowane kampanie.
  *
- * Dwa osobne żądania celowo: każde trafia w oddzielne wywołanie funkcji na
- * Cloudflare, więc ma własny budżet subrequestów (kolejkowanie nie przewraca wysyłki).
+ * Wcześniej Worker wołał też osobno /api/cron/auto-enqueue. processQueue i tak
+ * uruchamia automat, więc CRM był czytany dwa razy na przebieg — przy planie
+ * Free Supabase (5 GB transferu) to realny koszt. Endpoint zostaje do ręcznego użycia.
  */
 interface Env {
 	HUB_URL: string;
@@ -28,12 +29,6 @@ async function call(env: Env, path: string): Promise<void> {
 
 export default {
 	async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-		ctx.waitUntil(
-			(async () => {
-				// Najpierw dokolejkuj nowe zapisy, potem wyślij partię z kolejki.
-				await call(env, '/api/cron/auto-enqueue');
-				await call(env, '/api/cron/process-queue?limit=20');
-			})()
-		);
+		ctx.waitUntil(call(env, '/api/cron/process-queue?limit=20'));
 	}
 };

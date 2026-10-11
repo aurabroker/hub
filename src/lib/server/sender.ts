@@ -4,11 +4,15 @@ import { EMAIL_RE, hasRodoConsent, normalizeInterest } from '$lib/categories';
 import { renderEmailHtml } from '$lib/email/render';
 import { fetchAllRows } from '$lib/server/supabase';
 import { decorateLinksWithUtm, slugifyUtm } from '$lib/utm';
-import { sendResendEmail, type ResendAttachment } from './resend';
+import { startOfWarsawDayIso } from '$lib/warsaw';
+import { resendTemplateFrom, sendResendEmail, type ResendAttachment } from './resend';
 
 export const BUCKET = 'email-assets';
-/** Resend domyślnie limituje do 2 req/s — odstęp między pojedynczymi wysyłkami. */
-export const SEND_DELAY_MS = 650;
+/**
+ * Odstęp między pojedynczymi wysyłkami. Domyślnie pod limit Resend 2 req/s;
+ * konto z wyższym limitem może go skrócić zmienną SEND_DELAY_MS.
+ */
+export const SEND_DELAY_MS = Number(env.SEND_DELAY_MS ?? '') || 650;
 /**
  * Dzienny limit realnie wysłanych maili — zabezpieczenie przed masową wysyłką.
  * Z komercyjnym planem Resend praktycznie nieograniczony; domyślnie bardzo wysoki,
@@ -19,6 +23,12 @@ export const DAILY_SEND_LIMIT = Number(env.DAILY_SEND_LIMIT ?? '') || 100000;
 const MAX_ATTEMPTS = 3;
 /** Po tylu minutach wiadomość w stanie 'sending' uznajemy za zawieszoną i wracamy z nią do kolejki. */
 const STALE_SENDING_MINUTES = 15;
+/**
+ * Resend pamięta klucz idempotencji 24 h. Zawieszonej wiadomości starszej niż
+ * ten próg nie ponawiamy automatycznie — klucz mógł już wygasnąć, a wtedy
+ * ponowienie wysłałoby drugi egzemplarz.
+ */
+const IDEMPOTENCY_SAFE_HOURS = 23;
 /** Base64 dokłada ~33%; cała wiadomość ma limit 40 MB. */
 const MAX_ATTACHMENT_TOTAL_BYTES = 28 * 1024 * 1024;
 
@@ -82,6 +92,43 @@ export function companyVariables(company: CrmCompany | null): Record<string, str
 		nip: company.nip ?? ''
 	};
 }
+
+/**
+ * ILIKE bez symboli wieloznacznych: '_' w adresie (jan_kowalski@…) dopasowałby
+ * też inny znak, czyli innego klienta.
+ */
+function escapeLike(value: string): string {
+	return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+/** Adres w postaci do porównań (duplikaty, blokady). */
+export function normalizeEmail(email: string | null | undefined): string {
+	return (email ?? '').trim().toLowerCase();
+}
+
+/**
+ * Adresy, na które nie wysyłamy marketingu: twarde odbicie albo zgłoszenie
+ * spamu w historii wysyłek (zdarzenia z webhooka Resend). Resend i tak
+ * blokuje takie adresy u siebie, ale wtedy HUB pokazywałby je jako „wysłane”.
+ * To nie jest rejestr wypisów — wypisów HUB jeszcze nie zbiera.
+ */
+export async function loadBlockedEmails(db: SupabaseClient): Promise<Set<string>> {
+	const rows = await fetchAllRows<{ to_email: string }>(
+		(from, to) =>
+			db
+				.from('email_messages')
+				.select('to_email')
+				.or('status.eq.bounced,complained_at.not.is.null')
+				.order('id')
+				.range(from, to),
+		'email_messages blokady'
+	);
+	return new Set(rows.map((r) => normalizeEmail(r.to_email)));
+}
+
+export const BLOCKED_REASON = 'Adres wcześniej odbił maila albo zgłosił spam';
+export const DUPLICATE_REASON = 'Ten sam adres jest już w tej wysyłce';
+export const CANCELED_REASON = 'Kampania anulowana';
 
 export async function loadActiveCategories(db: SupabaseClient): Promise<EmailCategory[]> {
 	const { data, error } = await db
@@ -253,6 +300,8 @@ export interface SendOutcome {
 	error?: string;
 	/** true = ktoś inny już przetworzył tę wiadomość (nie liczyć jako błąd). */
 	skipped?: boolean;
+	/** Resend odpowiedział 429 — dalsze wysyłki w tej partii nie mają sensu. */
+	rateLimited?: boolean;
 }
 
 /**
@@ -274,9 +323,10 @@ export async function sendMessageNow(
 
 	const message = await claimMessage(db, messageId, current.attempts as number);
 	if (!message) return { ok: false, skipped: true, error: 'Wiadomość już przetworzona' };
+	const attempt = message.attempts as number;
 
 	const fail = async (errorText: string): Promise<SendOutcome> => {
-		const permanent = (message.attempts as number) >= MAX_ATTEMPTS;
+		const permanent = attempt >= MAX_ATTEMPTS;
 		await db
 			.from('email_messages')
 			.update({ status: permanent ? 'failed' : 'queued', error: errorText })
@@ -302,7 +352,20 @@ export async function sendMessageNow(
 		campaign = data;
 	}
 
-	const from = campaign?.from_email || category.from_email || env.RESEND_FROM;
+	// Treść z Edytora HUB ma pierwszeństwo: gdy sekcja ma własny html_body,
+	// wysyłamy surowy HTML (personalizacja podstawiana po naszej stronie) zamiast
+	// szablonu Resend. Brak html_body → dawna ścieżka szablonu (bez zmian).
+	const htmlBody = typeof category.html_body === 'string' ? category.html_body.trim() : '';
+	const templateId = htmlBody ? null : ((category.resend_template_id as string | null) ?? null);
+
+	// Nadawca: kampania → sekcja → nadawca zapisany w szablonie Resend → RESEND_FROM.
+	// Bez kroku z szablonem RESEND_FROM nadpisywał nadawcę szablonu i newsletter
+	// jednej marki wychodził z adresu innej.
+	const templateFrom =
+		!campaign?.from_email && !category.from_email && templateId
+			? await resendTemplateFrom(templateId)
+			: null;
+	const from = campaign?.from_email || category.from_email || templateFrom || env.RESEND_FROM;
 	if (!from) return fail('Brak adresu nadawcy (RESEND_FROM / kategoria / kampania)');
 	const subject = campaign?.subject || category.subject || undefined;
 
@@ -314,11 +377,11 @@ export async function sendMessageNow(
 	);
 	if (attachError) return fail(attachError);
 
-	// Treść z Edytora HUB ma pierwszeństwo: gdy sekcja ma własny html_body,
-	// wysyłamy surowy HTML (personalizacja podstawiana po naszej stronie) zamiast
-	// szablonu Resend. Brak html_body → dawna ścieżka szablonu (bez zmian).
-	const htmlBody = typeof category.html_body === 'string' ? category.html_body.trim() : '';
 	const messageVars = (message.variables_json ?? {}) as Record<string, string>;
+	// Klucz idempotencji zależy od numeru próby: po odrzuceniu przez Resend kolejna
+	// próba dostaje nowy klucz, a po awarii między wysyłką a zapisem statusu
+	// (odzyskiwanie w processQueue oddaje próbę) — ten sam, więc Resend nie wyśle duplikatu.
+	const idempotencyKey = `aura-hub/${messageId}/${attempt}`;
 
 	let result;
 	if (htmlBody) {
@@ -339,23 +402,55 @@ export async function sendMessageNow(
 			unsubscribeUrl: env.RESEND_UNSUBSCRIBE_URL,
 			plikiHtml: fileVariables.pliki_html
 		});
-		result = await sendResendEmail({ from, to: message.to_email as string, subject, html, attachments });
+		result = await sendResendEmail({
+			from,
+			to: message.to_email as string,
+			subject,
+			html,
+			attachments,
+			idempotencyKey
+		});
 	} else {
 		result = await sendResendEmail({
 			from,
 			to: message.to_email as string,
 			subject,
-			templateId: category.resend_template_id,
-			variables: { ...messageVars, ...fileVariables },
-			attachments
+			templateId,
+			// link_wypisu: Resend NIE wypełnia {{{RESEND_UNSUBSCRIBE_URL}}} przy wysyłce
+			// przez API (tylko w Broadcasts), więc szablon musi używać tej zmiennej.
+			variables: {
+				...messageVars,
+				...fileVariables,
+				link_wypisu: env.RESEND_UNSUBSCRIBE_URL ?? ''
+			},
+			attachments,
+			idempotencyKey
 		});
 	}
-	if (!result.ok) return fail(result.error ?? 'Nieznany błąd Resend');
+	if (!result.ok) {
+		if (result.rateLimited) {
+			// 429 to limit konta, nie wina wiadomości: wracamy do kolejki bez zużycia próby.
+			await db
+				.from('email_messages')
+				.update({ status: 'queued', attempts: attempt - 1, error: result.error ?? null })
+				.eq('id', messageId);
+			return { ok: false, error: result.error, rateLimited: true };
+		}
+		return fail(result.error ?? 'Nieznany błąd Resend');
+	}
 
-	await db
-		.from('email_messages')
-		.update({ status: 'sent', resend_id: result.id, sent_at: new Date().toISOString(), error: null })
-		.eq('id', messageId);
+	// Mail już wyszedł. Nieudany zapis statusu zostawia wiadomość w 'sending';
+	// odzyskiwanie ponowi ją z tym samym kluczem idempotencji, więc bez duplikatu.
+	const sentUpdate = {
+		status: 'sent',
+		resend_id: result.id,
+		sent_at: new Date().toISOString(),
+		error: null
+	};
+	const saveStatus = () => db.from('email_messages').update(sentUpdate).eq('id', messageId);
+	let { error: saveError } = await saveStatus();
+	if (saveError) ({ error: saveError } = await saveStatus());
+	if (saveError) console.error(`zapis statusu ${messageId} po wysyłce: ${saveError.message}`);
 
 	if (message.company_id) {
 		await db.from('crm_history').insert({
@@ -442,7 +537,7 @@ export async function quickSend(
 	const { data: company } = await db
 		.from('crm_companies')
 		.select(COMPANY_COLUMNS)
-		.ilike('email', toEmail.trim())
+		.ilike('email', escapeLike(toEmail.trim()))
 		.order('created_at', { ascending: true })
 		.limit(1)
 		.maybeSingle();
@@ -512,7 +607,32 @@ export interface AudiencePreview {
 	queued: number;
 	skippedNoConsent: number;
 	skippedBadEmail: number;
+	/** Adres z twardym odbiciem albo skargą na spam w historii wysyłek. */
+	skippedBlocked: number;
+	/** Ten sam adres na kilku kartach CRM — wysyłamy raz. */
+	skippedDuplicate: number;
 	excludedByMode: number;
+}
+
+/**
+ * Wspólna bramka odbiorcy dla kampanii, wysyłki „do wszystkich” i automatu:
+ * poprawny adres → brak sprzeciwu RODO → brak blokady → pierwszy raz w tej wysyłce.
+ * `seen` jest uzupełniany o przepuszczone adresy (deduplikacja po adresie, nie po
+ * karcie CRM — ta sama osoba bywa w bazie kilka razy).
+ */
+function recipientGate(
+	company: CrmCompany,
+	blocked: Set<string>,
+	seen: Set<string>
+): { email: string; reason: string | null } {
+	const email = (company.email ?? '').trim();
+	if (!EMAIL_RE.test(email)) return { email, reason: 'Niepoprawny adres e-mail' };
+	if (!hasRodoConsent(company.rodo)) return { email, reason: 'Brak zgody RODO na wysyłkę' };
+	const norm = normalizeEmail(email);
+	if (blocked.has(norm)) return { email, reason: BLOCKED_REASON };
+	if (seen.has(norm)) return { email, reason: DUPLICATE_REASON };
+	seen.add(norm);
+	return { email, reason: null };
 }
 
 /** Zastosowanie audience_mode względem historii wysyłek danej kategorii. */
@@ -551,7 +671,8 @@ async function applyAudienceMode(
 			sentTo.add(cid);
 			if (row.opened_at) openedBy.add(cid);
 		}
-		if (row.status === 'failed' || row.status === 'bounced') failedFor.add(cid);
+		// Odbite adresy celowo pomijamy: ponowna wysyłka na twarde odbicie psuje reputację domeny.
+		if (row.status === 'failed') failedFor.add(cid);
 	}
 
 	let filtered: CrmCompany[];
@@ -578,17 +699,27 @@ export async function previewAudience(
 	mode: string,
 	categoryId: string | null
 ): Promise<AudiencePreview> {
-	const all = await segmentCompanies(db, filters);
+	const [all, blocked] = await Promise.all([segmentCompanies(db, filters), loadBlockedEmails(db)]);
 	const { companies, excluded } = await applyAudienceMode(db, all, mode, categoryId);
-	let queued = 0;
-	let skippedNoConsent = 0;
-	let skippedBadEmail = 0;
+	const preview: AudiencePreview = {
+		total: all.length,
+		queued: 0,
+		skippedNoConsent: 0,
+		skippedBadEmail: 0,
+		skippedBlocked: 0,
+		skippedDuplicate: 0,
+		excludedByMode: excluded
+	};
+	const seen = new Set<string>();
 	for (const c of companies) {
-		if (!c.email || !EMAIL_RE.test(c.email.trim())) skippedBadEmail++;
-		else if (!hasRodoConsent(c.rodo)) skippedNoConsent++;
-		else queued++;
+		const { reason } = recipientGate(c, blocked, seen);
+		if (reason === null) preview.queued++;
+		else if (reason === BLOCKED_REASON) preview.skippedBlocked++;
+		else if (reason === DUPLICATE_REASON) preview.skippedDuplicate++;
+		else if (reason.startsWith('Brak zgody')) preview.skippedNoConsent++;
+		else preview.skippedBadEmail++;
 	}
-	return { total: all.length, queued, skippedNoConsent, skippedBadEmail, excludedByMode: excluded };
+	return preview;
 }
 
 /**
@@ -607,8 +738,19 @@ export async function materializeCampaign(
 		.single();
 	if (error || !campaign) throw new Error(`Nie znaleziono kampanii ${campaignId}`);
 
+	// Wznowienie anulowanej kampanii: wiadomości zdjęte z kolejki przy anulowaniu
+	// wracają. Pętla niżej by ich nie odtworzyła, bo te kontakty już mają wiersz.
+	const { data: resumedRows, error: resumeError } = await db
+		.from('email_messages')
+		.update({ status: 'queued', error: null })
+		.eq('campaign_id', campaignId)
+		.eq('status', 'skipped')
+		.eq('error', CANCELED_REASON)
+		.select('id');
+	if (resumeError) throw new Error(`wznowienie kampanii: ${resumeError.message}`);
+
 	const filters = (campaign.segment_json ?? {}) as SegmentFilters;
-	const all = await segmentCompanies(db, filters);
+	const [all, blocked] = await Promise.all([segmentCompanies(db, filters), loadBlockedEmails(db)]);
 	const { companies } = await applyAudienceMode(
 		db,
 		all,
@@ -618,11 +760,11 @@ export async function materializeCampaign(
 
 	// Zbiór już zmaterializowanych odbiorców kampanii: gdyby był niepełny,
 	// ponowny start kampanii dopisałby duplikaty.
-	const existing = await fetchAllRows<{ company_id: number }>(
+	const existing = await fetchAllRows<{ company_id: number; to_email: string; status: string }>(
 		(from, to) =>
 			db
 				.from('email_messages')
-				.select('company_id')
+				.select('company_id, to_email, status')
 				.eq('campaign_id', campaignId)
 				.not('company_id', 'is', null)
 				.order('id')
@@ -630,6 +772,11 @@ export async function materializeCampaign(
 		'email_messages'
 	);
 	const already = new Set(existing.map((r) => r.company_id));
+	// Adresy, które ta kampania już obsłużyła — drugi wiersz CRM z tym samym
+	// adresem nie może dostać drugiego egzemplarza.
+	const seen = new Set(
+		existing.filter((r) => r.status !== 'skipped').map((r) => normalizeEmail(r.to_email))
+	);
 
 	// Budujemy wszystkie wiersze w pamięci, a potem wstawiamy HURTOWO (chunk).
 	// Round-trip do bazy per odbiorca przekracza limit ~50 subrequestów pojedynczego
@@ -641,16 +788,8 @@ export async function materializeCampaign(
 	for (const company of companies) {
 		if (already.has(company.id)) continue;
 
-		const email = (company.email ?? '').trim();
-		let status: 'queued' | 'skipped' = 'queued';
-		let reason: string | null = null;
-		if (!EMAIL_RE.test(email)) {
-			status = 'skipped';
-			reason = 'Niepoprawny adres e-mail';
-		} else if (!hasRodoConsent(company.rodo)) {
-			status = 'skipped';
-			reason = 'Brak zgody RODO na wysyłkę';
-		}
+		const { email, reason } = recipientGate(company, blocked, seen);
+		const status: 'queued' | 'skipped' = reason === null ? 'queued' : 'skipped';
 
 		const row = {
 			campaign_id: campaignId,
@@ -679,7 +818,7 @@ export async function materializeCampaign(
 	}
 
 	// W kolejce: wstaw wiadomości i dopnij snapshot domyślnych załączników kategorii.
-	let queued = 0;
+	let queued = resumedRows?.length ?? 0;
 	const assetIds = await categoryAssetIds(db, categoryId);
 	for (let i = 0; i < queuedRows.length; i += CHUNK) {
 		const slice = queuedRows.slice(i, i + CHUNK);
@@ -705,10 +844,9 @@ export async function materializeCampaign(
 	return { queued, skipped };
 }
 
+/** Limity dzienne liczymy od północy w Warszawie, nie w UTC (Cloudflare liczy w UTC). */
 function startOfTodayIso(): string {
-	const d = new Date();
-	d.setHours(0, 0, 0, 0);
-	return d.toISOString();
+	return startOfWarsawDayIso();
 }
 
 export interface DailySendStatus {
@@ -754,7 +892,10 @@ export interface CategoryBlastResult {
 	enqueued: number;
 	skippedNoConsent: number;
 	skippedBadEmail: number;
+	/** Kontakt (albo ten sam adres na innej karcie CRM) był już obsłużony w tej kategorii. */
 	skippedDuplicate: number;
+	/** Adres z twardym odbiciem albo skargą na spam. */
+	skippedBlocked: number;
 }
 
 /**
@@ -778,20 +919,23 @@ export async function enqueueCategoryBlast(
 	if (!category) throw new Error('Nie znaleziono aktywnej kategorii');
 	const code = category.code as string;
 
-	const rows = await fetchAllRows<CrmCompany>(
-		(from, to) => db.from('crm_companies').select(COMPANY_COLUMNS).order('id').range(from, to),
-		'crm_companies'
-	);
+	const [rows, blocked] = await Promise.all([
+		fetchAllRows<CrmCompany>(
+			(from, to) => db.from('crm_companies').select(COMPANY_COLUMNS).order('id').range(from, to),
+			'crm_companies'
+		),
+		loadBlockedEmails(db)
+	]);
 	const companies = rows.filter((c) => normalizeInterest(c.ubezpieczenie) === code);
 
 	// Kontakty już obsłużone w tej kategorii: wysłane lub czekające w kolejce.
 	// Ta lista decyduje, komu NIE wysyłamy ponownie. Przycięta do db_max_rows
 	// oznaczałaby duplikaty maili, więc czytamy ją stronami.
-	const existing = await fetchAllRows<{ company_id: number }>(
+	const existing = await fetchAllRows<{ company_id: number; to_email: string }>(
 		(from, to) =>
 			db
 				.from('email_messages')
-				.select('company_id, status')
+				.select('company_id, to_email')
 				.eq('category_id', categoryId)
 				.not('company_id', 'is', null)
 				.in('status', ['queued', 'sending', 'sent'])
@@ -800,6 +944,7 @@ export async function enqueueCategoryBlast(
 		'email_messages'
 	);
 	const handled = new Set(existing.map((r) => r.company_id));
+	const seen = new Set(existing.map((r) => normalizeEmail(r.to_email)));
 
 	const result: CategoryBlastResult = {
 		code,
@@ -808,24 +953,22 @@ export async function enqueueCategoryBlast(
 		enqueued: 0,
 		skippedNoConsent: 0,
 		skippedBadEmail: 0,
-		skippedDuplicate: 0
+		skippedDuplicate: 0,
+		skippedBlocked: 0
 	};
 
 	const toInsert: Record<string, unknown>[] = [];
 	for (const c of companies) {
-		const email = (c.email ?? '').trim();
-		if (!EMAIL_RE.test(email)) {
-			result.skippedBadEmail++;
-			continue;
-		}
-		if (!hasRodoConsent(c.rodo)) {
-			result.skippedNoConsent++;
-			continue;
-		}
 		if (handled.has(c.id)) {
 			result.skippedDuplicate++;
 			continue;
 		}
+		const { email, reason } = recipientGate(c, blocked, seen);
+		if (reason === BLOCKED_REASON) result.skippedBlocked++;
+		else if (reason === DUPLICATE_REASON) result.skippedDuplicate++;
+		else if (reason?.startsWith('Brak zgody')) result.skippedNoConsent++;
+		else if (reason) result.skippedBadEmail++;
+		if (reason) continue;
 		toInsert.push({
 			campaign_id: null,
 			category_id: categoryId,
@@ -863,6 +1006,11 @@ export async function enqueueCategoryBlast(
 
 /** Dobowy limit maili wysyłanych automatem (osobny od kampanii/ręcznych). */
 export const AUTO_SEND_DAILY_LIMIT = Number(env.AUTO_SEND_DAILY_LIMIT ?? '') || 100;
+/**
+ * Automat odpowiada wyłącznie na świeże zapisy. Mail powitalny po miesiącu jest
+ * bardziej dziwny niż pomocny, a okno ogranicza też, ile CRM czytamy co minutę.
+ */
+const AUTO_SEND_MAX_AGE_DAYS = Number(env.AUTO_SEND_MAX_AGE_DAYS ?? '') || 14;
 
 export interface AutoSendResult {
 	enqueued: number;
@@ -873,9 +1021,9 @@ export interface AutoSendResult {
 
 /**
  * Automatyczna wysyłka: kolejkuje NOWE zapisy dla sekcji z auto_send = true.
- * Bierze wyłącznie kontakty zapisane po `auto_send_since` (data odcięcia), z
- * poprawnym e-mailem i zgodą RODO, które nie były jeszcze obsłużone w tej sekcji.
- * Respektuje dobowy limit automatu. Wstawianie hurtowe (limit subrequestów CF).
+ * Bierze wyłącznie kontakty zapisane po `auto_send_since` (data odcięcia) i nie
+ * starsze niż AUTO_SEND_MAX_AGE_DAYS, z poprawnym e-mailem i zgodą RODO, które nie
+ * były jeszcze obsłużone w tej sekcji. Respektuje dobowy limit automatu.
  */
 export async function enqueueAutoSend(db: SupabaseClient): Promise<AutoSendResult> {
 	const result: AutoSendResult = { enqueued: 0, perCategory: {} };
@@ -886,7 +1034,9 @@ export async function enqueueAutoSend(db: SupabaseClient): Promise<AutoSendResul
 		.eq('active', true)
 		.eq('auto_send', true);
 	if (catErr) throw new Error(`email_categories: ${catErr.message}`);
-	if (!cats || cats.length === 0) return result;
+	// Brak daty odcięcia = nie ryzykujemy wysyłki do całej bazy.
+	const active = (cats ?? []).filter((c) => Boolean(c.auto_send_since));
+	if (active.length === 0) return result;
 
 	// Dobowy limit automatu — liczony na wiadomościach zakolejkowanych dziś przez automat.
 	const { count: autoToday } = await db
@@ -897,55 +1047,79 @@ export async function enqueueAutoSend(db: SupabaseClient): Promise<AutoSendResul
 	let budget = Math.max(0, AUTO_SEND_DAILY_LIMIT - (autoToday ?? 0));
 	if (budget <= 0) return { ...result, limitReached: true };
 
-	// Kontakty pobieramy raz dla wszystkich sekcji (oszczędność subrequestów).
-	const { data: rows, error: coErr } = await db
-		.from('crm_companies')
-		.select(`${COMPANY_COLUMNS}, created_at, data_zgloszenia`)
-		.limit(20000);
-	if (coErr) throw new Error(`crm_companies: ${coErr.message}`);
-	const companies = (rows ?? []) as (CrmCompany & {
-		created_at: string | null;
-		data_zgloszenia: string | null;
-	})[];
+	// Czytamy tylko kandydatów z okna czasowego, filtrem po stronie bazy. Wcześniej
+	// `.limit(20000)` bez sortowania zwracało przypadkowe 1000 z całej bazy
+	// (db_max_rows), więc część nowych zapisów automat po prostu nie widział.
+	const windowStartMs = Date.now() - AUTO_SEND_MAX_AGE_DAYS * 86_400_000;
+	const earliestSinceMs = Math.min(...active.map((c) => Date.parse(c.auto_send_since as string)));
+	const fromIso = new Date(Math.max(windowStartMs, earliestSinceMs)).toISOString();
+	const companies = await fetchAllRows<
+		CrmCompany & { created_at: string | null; data_zgloszenia: string | null }
+	>(
+		(from, to) =>
+			db
+				.from('crm_companies')
+				.select(`${COMPANY_COLUMNS}, created_at, data_zgloszenia`)
+				.or(`created_at.gt."${fromIso}",data_zgloszenia.gt."${fromIso}"`)
+				.order('id')
+				.range(from, to),
+		'crm_companies (automat)'
+	);
+	if (companies.length === 0) return result;
 
-	for (const cat of cats) {
+	const blocked = await loadBlockedEmails(db);
+
+	for (const cat of active) {
 		if (budget <= 0) {
 			result.limitReached = true;
 			break;
 		}
 		const categoryId = cat.id as string;
 		const code = cat.code as string;
-		// Brak daty odcięcia = nie ryzykujemy wysyłki do całej bazy.
-		const since = cat.auto_send_since as string | null;
-		if (!since) continue;
-		const sinceMs = Date.parse(since);
+		const sinceMs = Math.max(Date.parse(cat.auto_send_since as string), windowStartMs);
 
-		const existing = await fetchAllRows<{ company_id: number }>(
-			(from, to) =>
-				db
-					.from('email_messages')
-					.select('company_id')
-					.eq('category_id', categoryId)
-					.not('company_id', 'is', null)
-					.in('status', ['queued', 'sending', 'sent'])
-					.order('id')
-					.range(from, to),
-			'email_messages'
-		);
-		const handled = new Set(existing.map((r) => r.company_id));
+		const candidates = companies.filter((c) => {
+			if (normalizeInterest(c.ubezpieczenie) !== code) return false;
+			const signedUp = Date.parse(c.data_zgloszenia ?? c.created_at ?? '');
+			return Number.isFinite(signedUp) && signedUp > sinceMs;
+		});
+		if (candidates.length === 0) continue;
+
+		// Obsłużony = jakakolwiek wcześniejsza wiadomość tej sekcji poza pominiętą,
+		// także nieudana albo odbita. Inaczej każdy przebieg crona kolejkowałby
+		// odbity adres od nowa. Sprawdzamy po karcie CRM i po adresie.
+		const emails = [...new Set(candidates.map((c) => (c.email ?? '').trim()).filter(Boolean))];
+		const [byCompany, byEmail] = await Promise.all([
+			db
+				.from('email_messages')
+				.select('company_id, to_email')
+				.eq('category_id', categoryId)
+				.neq('status', 'skipped')
+				.in('company_id', candidates.map((c) => c.id)),
+			emails.length > 0
+				? db
+						.from('email_messages')
+						.select('company_id, to_email')
+						.eq('category_id', categoryId)
+						.neq('status', 'skipped')
+						.in('to_email', emails)
+				: Promise.resolve({ data: [], error: null })
+		]);
+		if (byCompany.error) throw new Error(`email_messages (automat): ${byCompany.error.message}`);
+		if (byEmail.error) throw new Error(`email_messages (automat): ${byEmail.error.message}`);
+		const handledRows = [...(byCompany.data ?? []), ...(byEmail.data ?? [])] as {
+			company_id: number | null;
+			to_email: string;
+		}[];
+		const handled = new Set(handledRows.map((r) => r.company_id));
+		const seen = new Set(handledRows.map((r) => normalizeEmail(r.to_email)));
 
 		const toInsert: Record<string, unknown>[] = [];
-		for (const c of companies) {
+		for (const c of candidates) {
 			if (budget - toInsert.length <= 0) break;
-			if (normalizeInterest(c.ubezpieczenie) !== code) continue;
-
-			const signedUp = Date.parse(c.data_zgloszenia ?? c.created_at ?? '');
-			if (!Number.isFinite(signedUp) || signedUp <= sinceMs) continue;
-
-			const email = (c.email ?? '').trim();
-			if (!EMAIL_RE.test(email)) continue;
-			if (!hasRodoConsent(c.rodo)) continue;
 			if (handled.has(c.id)) continue;
+			const { email, reason } = recipientGate(c, blocked, seen);
+			if (reason) continue;
 
 			toInsert.push({
 				campaign_id: null,
@@ -961,27 +1135,18 @@ export async function enqueueAutoSend(db: SupabaseClient): Promise<AutoSendResul
 		if (toInsert.length === 0) continue;
 
 		const assetIds = await categoryAssetIds(db, categoryId);
-		const CHUNK = 500;
-		let added = 0;
-		for (let i = 0; i < toInsert.length; i += CHUNK) {
-			const slice = toInsert.slice(i, i + CHUNK);
-			const { data: inserted, error: insErr } = await db
-				.from('email_messages')
-				.insert(slice)
-				.select('id');
-			if (insErr) throw new Error(`email_messages insert: ${insErr.message}`);
-			added += inserted?.length ?? 0;
-			if (assetIds.length > 0 && inserted && inserted.length > 0) {
-				const attachRows = inserted.flatMap((m) =>
-					assetIds.map((assetId) => ({ message_id: m.id as string, asset_id: assetId }))
-				);
-				for (let j = 0; j < attachRows.length; j += CHUNK) {
-					const { error: attErr } = await db
-						.from('email_attachments')
-						.insert(attachRows.slice(j, j + CHUNK));
-					if (attErr) throw new Error(`email_attachments insert: ${attErr.message}`);
-				}
-			}
+		const { data: inserted, error: insErr } = await db
+			.from('email_messages')
+			.insert(toInsert)
+			.select('id');
+		if (insErr) throw new Error(`email_messages insert: ${insErr.message}`);
+		const added = inserted?.length ?? 0;
+		if (assetIds.length > 0 && inserted && inserted.length > 0) {
+			const attachRows = inserted.flatMap((m) =>
+				assetIds.map((assetId) => ({ message_id: m.id as string, asset_id: assetId }))
+			);
+			const { error: attErr } = await db.from('email_attachments').insert(attachRows);
+			if (attErr) throw new Error(`email_attachments insert: ${attErr.message}`);
 		}
 		result.perCategory[code] = added;
 		result.enqueued += added;
@@ -991,6 +1156,72 @@ export async function enqueueAutoSend(db: SupabaseClient): Promise<AutoSendResul
 	return result;
 }
 
+/**
+ * Odzyskiwanie zawieszonych wiadomości: jeśli funkcja padnie po przejęciu maila
+ * (status 'sending'), nikt go już nie podniesie — claimMessage bierze tylko 'queued'.
+ *
+ * Awaria mogła nastąpić PO przyjęciu maila przez Resend, dlatego wracamy z oddaną
+ * próbą: kolejne przejęcie dostaje ten sam numer próby, więc ten sam klucz
+ * idempotencji, a Resend zamiast drugiego maila zwraca pierwotną odpowiedź.
+ * Klucz żyje 24 h — starszych zawieszonych nie ponawiamy, tylko oznaczamy do
+ * ręcznego sprawdzenia.
+ */
+async function reviveStuckMessages(db: SupabaseClient): Promise<void> {
+	const staleBefore = new Date(Date.now() - STALE_SENDING_MINUTES * 60_000).toISOString();
+	const { data: stuck, error } = await db
+		.from('email_messages')
+		.select('id, attempts, claimed_at')
+		.eq('status', 'sending')
+		.or(`claimed_at.is.null,claimed_at.lt."${staleBefore}"`)
+		.limit(50);
+	if (error) {
+		console.error(`odzyskiwanie zawieszonych: ${error.message}`);
+		return;
+	}
+	if (!stuck || stuck.length === 0) return;
+
+	const unsafeBefore = Date.now() - IDEMPOTENCY_SAFE_HOURS * 3_600_000;
+	for (const row of stuck) {
+		const claimedMs = row.claimed_at ? Date.parse(row.claimed_at as string) : NaN;
+		const update =
+			Number.isFinite(claimedMs) && claimedMs > unsafeBefore
+				? { status: 'queued', attempts: Math.max(0, (row.attempts as number) - 1) }
+				: {
+						status: 'failed',
+						error: 'Niepewny stan po awarii wysyłki — sprawdź w Resend, czy mail wyszedł'
+					};
+		await db.from('email_messages').update(update).eq('id', row.id).eq('status', 'sending');
+	}
+	console.warn(`odzyskano ${stuck.length} zawieszonych wiadomości z 'sending'`);
+}
+
+/**
+ * Domyka kampanie w stanie 'sending', którym nie została żadna wiadomość
+ * w kolejce: 'sent', gdy cokolwiek wyszło, inaczej 'failed'. Bez tego kampania
+ * z samymi pominiętymi odbiorcami wisiała „w trakcie wysyłki” na zawsze.
+ */
+export async function closeFinishedCampaigns(db: SupabaseClient): Promise<void> {
+	const { data: open } = await db.from('email_campaigns').select('id').eq('status', 'sending');
+	for (const campaign of open ?? []) {
+		const { count } = await db
+			.from('email_messages')
+			.select('id', { count: 'exact', head: true })
+			.eq('campaign_id', campaign.id)
+			.in('status', ['queued', 'sending']);
+		if ((count ?? 0) > 0) continue;
+		const { count: sentCount } = await db
+			.from('email_messages')
+			.select('id', { count: 'exact', head: true })
+			.eq('campaign_id', campaign.id)
+			.in('status', ['sent', 'bounced']);
+		await db
+			.from('email_campaigns')
+			.update({ status: (sentCount ?? 0) > 0 ? 'sent' : 'failed' })
+			.eq('id', campaign.id)
+			.eq('status', 'sending');
+	}
+}
+
 export interface ProcessResult {
 	processed: number;
 	sent: number;
@@ -998,6 +1229,8 @@ export interface ProcessResult {
 	requeued: number;
 	/** Osiągnięto dzienny limit wysyłki (dalsza wysyłka wznowi się jutro). */
 	dailyLimitReached?: boolean;
+	/** Resend odpowiedział 429 — partię przerwano, reszta pójdzie w kolejnym przebiegu. */
+	rateLimited?: boolean;
 }
 
 /**
@@ -1017,46 +1250,40 @@ export async function processQueue(
 	const batchCap = Number(env.QUEUE_BATCH_SIZE ?? '') || 20;
 	limit = Math.min(limit, batchCap);
 
-	// Odzyskiwanie zawieszonych wiadomości: jeśli funkcja padnie po przejęciu maila
-	// (status 'sending'), nikt go już nie podniesie — claimMessage bierze tylko 'queued'.
-	// Takie wiadomości wracają do kolejki po STALE_SENDING_MINUTES. Licznik prób
-	// zostaje nietknięty, więc MAX_ATTEMPTS nadal chroni przed pętlą wysyłki.
-	const staleBefore = new Date(Date.now() - STALE_SENDING_MINUTES * 60_000).toISOString();
-	const { data: revived, error: reviveErr } = await db
-		.from('email_messages')
-		.update({ status: 'queued' })
-		.eq('status', 'sending')
-		.or(`claimed_at.is.null,claimed_at.lt.${staleBefore}`)
-		.select('id');
-	if (reviveErr) {
-		console.error(`odzyskiwanie zawieszonych: ${reviveErr.message}`);
-	} else if (revived && revived.length > 0) {
-		console.warn(`odzyskano ${revived.length} zawieszonych wiadomości z 'sending'`);
-	}
+	await reviveStuckMessages(db);
 
 	// Automat: kolejkujemy nowe zapisy przy każdym przebiegu, więc nowy zapis dostaje
-	// maila w ciągu ~2 min niezależnie od stanu kolejki (budżet subrequestów na planie
-	// Paid to pozwala). Błąd automatu nie może przewrócić wysyłki, stąd try/catch.
+	// maila w ciągu ~minuty niezależnie od stanu kolejki. Błąd automatu nie może
+	// przewrócić wysyłki, stąd try/catch.
 	try {
 		await enqueueAutoSend(db);
 	} catch (e) {
 		console.error(`auto-send: ${e instanceof Error ? e.message : String(e)}`);
 	}
 
-	// Uruchom zaplanowane kampanie, którym minął termin
+	// Uruchom zaplanowane kampanie, którym minął termin. Błąd jednej kampanii
+	// nie może zablokować wysyłki pozostałych.
 	const { data: due } = await db
 		.from('email_campaigns')
 		.select('id')
 		.eq('status', 'scheduled')
 		.lte('scheduled_at', new Date().toISOString());
 	for (const campaign of due ?? []) {
-		await materializeCampaign(db, campaign.id as string);
-		await db.from('email_campaigns').update({ status: 'sending' }).eq('id', campaign.id);
+		try {
+			await materializeCampaign(db, campaign.id as string);
+			await db
+				.from('email_campaigns')
+				.update({ status: 'sending' })
+				.eq('id', campaign.id)
+				.eq('status', 'scheduled');
+		} catch (e) {
+			console.error(`start kampanii ${campaign.id}: ${e instanceof Error ? e.message : String(e)}`);
+		}
 	}
 
 	const result: ProcessResult = { processed: 0, sent: 0, failed: 0, requeued: 0 };
 
-	// Dzienny limit (darmowy plan Resend) — liczony na realnie wysłanych dziś mailach.
+	// Dzienny limit — liczony na realnie wysłanych dziś (doba warszawska) mailach.
 	const sentTodayRes = await db
 		.from('email_messages')
 		.select('id', { count: 'exact', head: true })
@@ -1066,44 +1293,45 @@ export async function processQueue(
 	const budget = Math.max(0, DAILY_SEND_LIMIT - sentToday);
 	const effectiveLimit = Math.min(limit, budget);
 	if (effectiveLimit <= 0) {
+		await closeFinishedCampaigns(db);
 		return { ...result, dailyLimitReached: true };
 	}
 
-	// Priorytet mają kampanie: najpierw bierzemy wiadomości kampanijne, a wolne
-	// miejsca w dziennym budżecie wypełniamy wysyłką „do wszystkich" (niekampanijną).
-	const { data: campaignBatch, error: cErr } = await db
-		.from('email_messages')
-		.select('id, campaign_id')
-		.eq('status', 'queued')
-		.not('campaign_id', 'is', null)
-		.order('created_at', { ascending: true })
-		.limit(effectiveLimit);
-	if (cErr) throw new Error(`kolejka: ${cErr.message}`);
-
-	const batch = [...(campaignBatch ?? [])];
-	const remainingSlots = effectiveLimit - batch.length;
-	if (remainingSlots > 0) {
-		const { data: blastBatch, error: bErr } = await db
+	// Kolejność: automat (odpowiedź na świeży zapis, mały wolumen, liczy się czas),
+	// potem kampanie, na końcu wysyłka „do wszystkich” wg kategorii. Wcześniej automat
+	// stał za całą kampanią i powitanie przychodziło po kilku godzinach.
+	const lanes: ((q: ReturnType<typeof queuedQuery>) => ReturnType<typeof queuedQuery>)[] = [
+		(q) => q.eq('source', 'auto'),
+		(q) => q.not('campaign_id', 'is', null),
+		(q) => q.is('campaign_id', null).neq('source', 'auto')
+	];
+	function queuedQuery() {
+		return db
 			.from('email_messages')
 			.select('id, campaign_id')
 			.eq('status', 'queued')
-			.is('campaign_id', null)
-			.order('created_at', { ascending: true })
-			.limit(remainingSlots);
-		if (bErr) throw new Error(`kolejka: ${bErr.message}`);
-		batch.push(...(blastBatch ?? []));
+			.order('created_at', { ascending: true });
 	}
-
-	const campaignIds = new Set<string>();
+	const batch: { id: string; campaign_id: string | null }[] = [];
+	for (const lane of lanes) {
+		const slots = effectiveLimit - batch.length;
+		if (slots <= 0) break;
+		const { data, error } = await lane(queuedQuery()).limit(slots);
+		if (error) throw new Error(`kolejka: ${error.message}`);
+		batch.push(...((data ?? []) as { id: string; campaign_id: string | null }[]));
+	}
 
 	for (const [index, row] of batch.entries()) {
 		if (index > 0) await sleep(SEND_DELAY_MS);
-		const outcome = await sendMessageNow(db, row.id as string, origin);
+		const outcome = await sendMessageNow(db, row.id, origin);
 		if (outcome.skipped) continue;
 		result.processed++;
-		if (row.campaign_id) campaignIds.add(row.campaign_id as string);
 		if (outcome.ok) result.sent++;
-		else {
+		else if (outcome.rateLimited) {
+			result.requeued++;
+			result.rateLimited = true;
+			break;
+		} else {
 			const { data: after } = await db
 				.from('email_messages')
 				.select('status')
@@ -1114,27 +1342,51 @@ export async function processQueue(
 		}
 	}
 
-	// Domknij kampanie bez pozostałych wiadomości w kolejce
-	for (const campaignId of campaignIds) {
-		const { count } = await db
-			.from('email_messages')
-			.select('id', { count: 'exact', head: true })
-			.eq('campaign_id', campaignId)
-			.in('status', ['queued', 'sending']);
-		if ((count ?? 0) === 0) {
-			const { count: sentCount } = await db
-				.from('email_messages')
-				.select('id', { count: 'exact', head: true })
-				.eq('campaign_id', campaignId)
-				.eq('status', 'sent');
-			await db
-				.from('email_campaigns')
-				.update({ status: (sentCount ?? 0) > 0 ? 'sent' : 'failed' })
-				.eq('id', campaignId)
-				.eq('status', 'sending');
-		}
-	}
+	await closeFinishedCampaigns(db);
 
 	result.dailyLimitReached = sentToday + result.sent >= DAILY_SEND_LIMIT;
 	return result;
+}
+
+export interface QueueHealth {
+	/** Wiadomości czekające w kolejce (wszystkie źródła). */
+	queued: number;
+	/** Ostatnie przejęcie wiadomości do wysyłki (cron, przycisk albo szybka wysyłka). */
+	lastActivityAt: string | null;
+	/** Kolejka nie jest pusta, a od ponad STALL_MINUTES nikt nic z niej nie wziął. */
+	stalled: boolean;
+	/** Szacowany czas opróżnienia kolejki przy działającym cronie (minuty). */
+	etaMinutes: number;
+}
+
+/** Ile minut bez ruchu przy niepustej kolejce uznajemy za awarię crona. */
+const STALL_MINUTES = 10;
+/** Przepustowość crona: partia co minutę (workers/queue-cron/wrangler.toml). */
+const CRON_RUNS_PER_HOUR = 60;
+
+/**
+ * Stan silnika wysyłki do pokazania w panelu. Bez tego jedyną oznaką martwego
+ * crona była kampania, która „sama z siebie” przestawała iść.
+ */
+export async function queueHealth(db: SupabaseClient): Promise<QueueHealth> {
+	const [queuedRes, lastRes] = await Promise.all([
+		db.from('email_messages').select('id', { count: 'exact', head: true }).eq('status', 'queued'),
+		db
+			.from('email_messages')
+			.select('claimed_at')
+			.not('claimed_at', 'is', null)
+			.order('claimed_at', { ascending: false })
+			.limit(1)
+			.maybeSingle()
+	]);
+	const queued = queuedRes.count ?? 0;
+	const lastActivityAt = (lastRes.data?.claimed_at as string | null | undefined) ?? null;
+	const lastMs = lastActivityAt ? Date.parse(lastActivityAt) : 0;
+	const batchCap = Number(env.QUEUE_BATCH_SIZE ?? '') || 20;
+	return {
+		queued,
+		lastActivityAt,
+		stalled: queued > 0 && Date.now() - lastMs > STALL_MINUTES * 60_000,
+		etaMinutes: Math.ceil((queued / (batchCap * CRON_RUNS_PER_HOUR)) * 60)
+	};
 }

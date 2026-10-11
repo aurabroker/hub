@@ -1,6 +1,7 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { previewAudience, type SegmentFilters } from '$lib/server/sender';
 import { adminClient } from '$lib/server/supabase';
+import { warsawLocalToIso } from '$lib/warsaw';
 import type { Actions, PageServerLoad } from './$types';
 
 function parseSegment(form: FormData): SegmentFilters {
@@ -66,6 +67,9 @@ export const actions: Actions = {
 		if (!values.category_id) {
 			return fail(400, { error: 'Wybierz kategorię (sekcję) kampanii', values });
 		}
+		if (values.scheduled_at && !warsawLocalToIso(values.scheduled_at)) {
+			return fail(400, { error: 'Niepoprawna data planowania', values });
+		}
 
 		const db = adminClient();
 		const { data, error } = await db
@@ -77,7 +81,8 @@ export const actions: Actions = {
 				from_email: values.from_email.trim() || null,
 				segment_json: parseSegment(form),
 				audience_mode: values.audience_mode,
-				scheduled_at: values.scheduled_at ? new Date(values.scheduled_at).toISOString() : null,
+				// datetime-local nie niesie strefy, a serwer liczy w UTC — czytamy jako czas warszawski.
+				scheduled_at: values.scheduled_at ? warsawLocalToIso(values.scheduled_at) : null,
 				status: 'draft',
 				created_by: locals.user?.id ?? null
 			})

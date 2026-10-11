@@ -1,6 +1,7 @@
 import { json, text } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { adminClient } from '$lib/server/supabase';
+import { cronSecretFrom, secretMatches } from '$lib/server/secrets';
 import { processQueue } from '$lib/server/sender';
 import type { RequestHandler } from './$types';
 
@@ -10,10 +11,7 @@ import type { RequestHandler } from './$types';
  */
 export const POST: RequestHandler = async ({ request, url }) => {
 	const secret = env.QUEUE_CRON_SECRET;
-	const provided =
-		request.headers.get('x-cron-secret') ??
-		request.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
-	if (!secret || provided !== secret) {
+	if (!secret || !secretMatches(cronSecretFrom(request), secret)) {
 		return text('Brak autoryzacji', { status: 401 });
 	}
 

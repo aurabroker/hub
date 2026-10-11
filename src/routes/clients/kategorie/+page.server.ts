@@ -1,5 +1,5 @@
 import { fail } from '@sveltejs/kit';
-import { adminClient } from '$lib/server/supabase';
+import { adminClient, fetchAllRows } from '$lib/server/supabase';
 import { dailySendStatus, enqueueCategoryBlast } from '$lib/server/sender';
 import { EMAIL_RE, hasRodoConsent, normalizeInterest } from '$lib/categories';
 import type { Actions, PageServerLoad } from './$types';
@@ -13,13 +13,27 @@ export const load: PageServerLoad = async () => {
 			.select('id, code, name, resend_template_id')
 			.eq('active', true)
 			.order('sort_order'),
-		db.from('crm_companies').select('id, email, rodo, ubezpieczenie').limit(20000),
+		// Stronami: `.limit(20000)` i tak oddawało tylko 1000 wierszy (db_max_rows),
+		// więc okno potwierdzenia podawało mniej odbiorców, niż faktycznie trafiało do kolejki.
+		fetchAllRows<{ id: number; email: string | null; rodo: string | null; ubezpieczenie: string | null }>(
+			(from, to) =>
+				db.from('crm_companies').select('id, email, rodo, ubezpieczenie').order('id').range(from, to),
+			'crm_companies'
+		)
+			.then((data) => ({ data, error: null as { message: string } | null }))
+			.catch((e: Error) => ({ data: [], error: { message: e.message } })),
 		dailySendStatus(db),
-		db
-			.from('email_messages')
-			.select('category_id')
-			.is('campaign_id', null)
-			.in('status', ['queued', 'sending'])
+		fetchAllRows<{ category_id: string | null }>(
+			(from, to) =>
+				db
+					.from('email_messages')
+					.select('category_id')
+					.is('campaign_id', null)
+					.in('status', ['queued', 'sending'])
+					.order('id')
+					.range(from, to),
+			'email_messages'
+		).then((data) => ({ data }))
 	]);
 
 	const totals = new Map<string, number>();
