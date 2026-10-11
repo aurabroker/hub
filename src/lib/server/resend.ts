@@ -95,36 +95,58 @@ export async function sendResendEmail(args: ResendSendArgs): Promise<ResendSendR
 	return { ok: true, id: data.id };
 }
 
-/** Pamięć nadawców szablonów w obrębie izolatu — szablon zmienia się rzadko. */
-const templateFromCache = new Map<string, { from: string | null; expires: number }>();
+export interface ResendTemplateInfo {
+	/** Nadawca zapisany w szablonie (null = szablon go nie ma). */
+	from: string | null;
+	/** Szablon nadal linkuje wypis przez zmienną, którą Resend wypełnia tylko w Broadcasts. */
+	deadUnsubscribeLink: boolean;
+}
+
+/** Pamięć szablonów w obrębie izolatu — szablon zmienia się rzadko. */
+const templateCache = new Map<string, { info: ResendTemplateInfo; expires: number }>();
 const TEMPLATE_CACHE_MS = 5 * 60_000;
 
 /**
- * Nadawca zapisany w szablonie Resend (GET /templates/:id), albo null, gdy
- * szablon go nie ma lub API nie odpowiedziało. Błąd nie blokuje wysyłki —
- * wywołujący spada wtedy na RESEND_FROM, czyli na dotychczasowe zachowanie.
+ * Odczyt szablonu Resend (GET /templates/:id). Przy błędzie API zwraca ostatnią
+ * znaną wersję, nawet przeterminowaną; bez niej — `ok: false`. Wywołujący NIE
+ * może wtedy po cichu wysłać z RESEND_FROM, bo to dokładnie ten błąd, w którym
+ * newsletter jednej marki wychodził z adresu innej.
  */
-export async function resendTemplateFrom(templateId: string): Promise<string | null> {
-	if (!env.RESEND_API_KEY) return null;
-	const cached = templateFromCache.get(templateId);
-	if (cached && cached.expires > Date.now()) return cached.from;
+export async function getResendTemplate(
+	templateId: string
+): Promise<{ ok: true; info: ResendTemplateInfo } | { ok: false; error: string; rateLimited?: boolean }> {
+	if (!env.RESEND_API_KEY) return { ok: false, error: 'Brak RESEND_API_KEY w środowisku' };
+	const cached = templateCache.get(templateId);
+	if (cached && cached.expires > Date.now()) return { ok: true, info: cached.info };
 
+	let failure: { error: string; rateLimited?: boolean };
 	try {
 		const res = await fetch(`https://api.resend.com/templates/${encodeURIComponent(templateId)}`, {
 			headers: { Authorization: `Bearer ${env.RESEND_API_KEY}` }
 		});
-		if (!res.ok) {
-			console.error(`szablon ${templateId}: Resend HTTP ${res.status}`);
-			return null;
+		if (res.ok) {
+			const data = (await res.json()) as { from?: string | null; html?: string | null };
+			const html = data.html ?? '';
+			const info: ResendTemplateInfo = {
+				from: typeof data.from === 'string' && data.from.trim() ? data.from.trim() : null,
+				deadUnsubscribeLink:
+					/RESEND_UNSUBSCRIBE_URL|\{\{\{?\s*UNSUBSCRIBE_URL/.test(html) && !html.includes('link_wypisu')
+			};
+			templateCache.set(templateId, { info, expires: Date.now() + TEMPLATE_CACHE_MS });
+			return { ok: true, info };
 		}
-		const data = (await res.json()) as { from?: string | null };
-		const from = typeof data.from === 'string' && data.from.trim() ? data.from.trim() : null;
-		templateFromCache.set(templateId, { from, expires: Date.now() + TEMPLATE_CACHE_MS });
-		return from;
+		failure = {
+			error: `Odczyt szablonu Resend ${templateId}: HTTP ${res.status}`,
+			rateLimited: res.status === 429
+		};
 	} catch (e) {
-		console.error(`szablon ${templateId}: ${e instanceof Error ? e.message : String(e)}`);
-		return null;
+		failure = {
+			error: `Odczyt szablonu Resend ${templateId}: ${e instanceof Error ? e.message : String(e)}`
+		};
 	}
+	if (cached) return { ok: true, info: cached.info };
+	console.error(failure.error);
+	return { ok: false, ...failure };
 }
 
 /**

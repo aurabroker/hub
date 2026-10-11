@@ -54,6 +54,8 @@
 		<p class="page-subtitle">
 			Sekcja: <strong>{data.campaign.email_categories?.name ?? '—'}</strong>
 			· Status: <strong>{statusLabel[data.campaign.status] ?? data.campaign.status}</strong>
+			· Nadawca: <strong>{data.sender.address ?? 'brak!'}</strong>
+			<span class="faint">({data.sender.source})</span>
 			{#if data.campaign.scheduled_at}
 				· {data.campaign.status === 'draft' ? 'Termin (po kliknięciu „Zaplanuj”)' : 'Zaplanowana'}:
 				{fmtDateTime(data.campaign.scheduled_at)}
@@ -72,11 +74,26 @@
 
 {#if data.health.stalled && ['sending', 'scheduled'].includes(data.campaign.status)}
 	<div class="alert alert-warning">
-		<strong>Kolejka stoi.</strong> Czeka {data.health.queued} wiadomości, a od
-		{data.health.lastActivityAt ? fmtDateTime(data.health.lastActivityAt) : 'dawna'} nic nie zostało
-		wysłane. Automatyczna wysyłka (Worker <span class="mono">aura-hub-queue-cron</span>) nie działa —
-		do czasu jej naprawy wysyłka idzie tylko przyciskiem „Przetwórz partię teraz”.
-		{#if data.campaign.status === 'scheduled'}Zaplanowana kampania sama nie wystartuje.{/if}
+		<strong>Kolejka stoi.</strong>
+		{#if data.health.queued > 0}
+			Czeka {data.health.queued} wiadomości, ostatnia wysyłka:
+			{data.health.lastActivityAt ? fmtDateTime(data.health.lastActivityAt) : 'brak'}.
+		{/if}
+		{#if data.health.overdueScheduled > 0}
+			Zaplanowanym kampaniom minął termin, a nie wystartowały.
+		{/if}
+		Automatyczna wysyłka (Worker <span class="mono">aura-hub-queue-cron</span>) nie działa —
+		do czasu naprawy wysyłka idzie tylko ręcznie
+		{#if data.campaign.status === 'scheduled'}(„Uruchom wysyłkę”){:else}(„Przetwórz partię teraz”){/if}.
+	</div>
+{/if}
+
+{#if data.deadUnsubscribeLink}
+	<div class="alert alert-error">
+		<strong>Szablon Resend ma martwy link wypisu.</strong> Używa zmiennej
+		<span class="mono">{'{{{RESEND_UNSUBSCRIBE_URL}}}'}</span>, którą Resend wypełnia tylko w Broadcasts —
+		w mailu z HUB link wychodzi pusty. Zamień ją w szablonie na
+		<span class="mono">{'{{{link_wypisu}}}'}</span> (z wartością domyślną) i opublikuj szablon przed wysyłką.
 	</div>
 {/if}
 
@@ -151,7 +168,7 @@
 			<span>
 				Postęp wysyłki: {done} / {sendable} ({progress}%)
 				{#if (data.counts.queued ?? 0) > 0 && !data.health.stalled}
-					· przy działającym cronie jeszcze ok. {data.health.etaMinutes} min
+					· cała kolejka ({data.health.queued}) zejdzie w ok. {data.health.etaMinutes} min
 				{/if}
 			</span>
 			<span class="muted">

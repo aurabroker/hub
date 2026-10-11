@@ -8,6 +8,8 @@ import {
 	queueHealth,
 	type SegmentFilters
 } from '$lib/server/sender';
+import { env } from '$env/dynamic/private';
+import { getResendTemplate } from '$lib/server/resend';
 import { adminClient } from '$lib/server/supabase';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -52,6 +54,30 @@ export const load: PageServerLoad = async ({ params, url }) => {
 		if (n > 0) counts[status] = n;
 	});
 
+	// Co faktycznie wyjdzie: nadawca wg tej samej kolejności co przy wysyłce
+	// i ostrzeżenie, gdy szablon ma link wypisu, którego Resend nie wypełni.
+	const category = campaign.email_categories as {
+		resend_template_id: string | null;
+		html_body: string | null;
+		from_email: string | null;
+	} | null;
+	let sender: { address: string | null; source: string } = {
+		address: env.RESEND_FROM ?? null,
+		source: 'RESEND_FROM'
+	};
+	let deadUnsubscribeLink = false;
+	if (campaign.from_email) sender = { address: campaign.from_email, source: 'kampania' };
+	else if (category?.from_email) sender = { address: category.from_email, source: 'sekcja' };
+	if (category?.resend_template_id && !category.html_body?.trim()) {
+		const template = await getResendTemplate(category.resend_template_id);
+		if (template.ok) {
+			deadUnsubscribeLink = template.info.deadUnsubscribeLink;
+			if (!campaign.from_email && !category.from_email && template.info.from) {
+				sender = { address: template.info.from, source: 'szablon Resend' };
+			}
+		}
+	}
+
 	let preview = null;
 	if (campaign.status === 'draft') {
 		preview = await previewAudience(
@@ -69,7 +95,9 @@ export const load: PageServerLoad = async ({ params, url }) => {
 		counts,
 		statusFilter,
 		preview,
-		health
+		health,
+		sender,
+		deadUnsubscribeLink
 	};
 };
 
@@ -108,16 +136,20 @@ export const actions: Actions = {
 	process: async ({ url }) => {
 		const result = await processQueue(adminClient(), url.origin, 20);
 		return {
-			success: `Partia przetworzona: wysłane ${result.sent}, błędy ${result.failed}, ponowienia ${result.requeued}${result.rateLimited ? ' (Resend: limit zapytań — reszta w kolejnej partii)' : ''}`
+			success: `Partia przetworzona: wysłane ${result.sent}, błędy ${result.failed}, ponowienia ${result.requeued}, wstrzymane (duplikat / blokada) ${result.withheld}${result.rateLimited ? ' (Resend: limit zapytań — reszta w kolejnej partii)' : ''}`
 		};
 	},
 
-	/** Ponowienie nieudanych: failed → queued z wyzerowanym licznikiem prób. */
+	/**
+	 * Ponowienie nieudanych: failed → queued. Licznika prób NIE zerujemy — kolejna
+	 * próba zaczyna nową rundę, a więc nowy klucz idempotencji. Po wyzerowaniu
+	 * Resend dostałby stary klucz i zamiast wysłać, oddałby pierwotną odpowiedź.
+	 */
 	retry: async ({ params }) => {
 		const db = adminClient();
 		const { data, error: updateError } = await db
 			.from('email_messages')
-			.update({ status: 'queued', attempts: 0, error: null })
+			.update({ status: 'queued', error: null })
 			.eq('campaign_id', params.id)
 			.eq('status', 'failed')
 			.select('id');

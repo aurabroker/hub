@@ -1,5 +1,6 @@
 import { json, text } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { attemptsToRoundEnd } from '$lib/server/sender';
 import { adminClient } from '$lib/server/supabase';
 import { verifySvixSignature } from '$lib/server/svix';
 import type { RequestHandler } from './$types';
@@ -69,7 +70,7 @@ export const POST: RequestHandler = async ({ request }) => {
 	const db = adminClient();
 	const { data: message, error: loadError } = await db
 		.from('email_messages')
-		.select('id, status, delivered_at, opened_at, clicked_at, bounced_at, complained_at')
+		.select('id, status, attempts, delivered_at, opened_at, clicked_at, bounced_at, complained_at')
 		.eq('resend_id', resendId)
 		.maybeSingle();
 	// Błąd bazy = 500, żeby Resend ponowił zdarzenie zamiast je zgubić.
@@ -78,7 +79,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		return json({ ignored: true, reason: 'nieznany resend_id' });
 	}
 
-	const row = message as Record<string, unknown> & { id: string; status: string };
+	const row = message as Record<string, unknown> & { id: string; status: string; attempts: number };
 	const update: Record<string, unknown> = {};
 	// Pierwsze zdarzenie wygrywa (np. pierwsza data otwarcia)
 	if (column && !row[column]) {
@@ -91,6 +92,8 @@ export const POST: RequestHandler = async ({ request }) => {
 		const reason = event.data?.failed?.reason;
 		update.status = undelivered.status;
 		update.error = reason ? `${undelivered.error}: ${reason}` : undelivered.error;
+		// „Ponów nieudane” musi wysłać naprawdę, czyli z nowym kluczem idempotencji.
+		update.attempts = attemptsToRoundEnd(row.attempts ?? 0);
 	}
 	if (Object.keys(update).length > 0) {
 		const { error: updateError } = await db.from('email_messages').update(update).eq('id', row.id);

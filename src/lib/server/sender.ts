@@ -5,7 +5,7 @@ import { renderEmailHtml } from '$lib/email/render';
 import { fetchAllRows } from '$lib/server/supabase';
 import { decorateLinksWithUtm, slugifyUtm } from '$lib/utm';
 import { startOfWarsawDayIso } from '$lib/warsaw';
-import { resendTemplateFrom, sendResendEmail, type ResendAttachment } from './resend';
+import { getResendTemplate, sendResendEmail, type ResendAttachment } from './resend';
 
 export const BUCKET = 'email-assets';
 /**
@@ -302,17 +302,76 @@ export interface SendOutcome {
 	skipped?: boolean;
 	/** Resend odpowiedział 429 — dalsze wysyłki w tej partii nie mają sensu. */
 	rateLimited?: boolean;
+	/** Kontrola odbiorcy przed wysyłką zdjęła wiadomość (blokada, duplikat, anulowana kampania). */
+	withheld?: boolean;
 }
 
 /**
- * Wysyła pojedynczą wiadomość z kolejki: szablon Resend kategorii +
- * pliki (załączniki albo linki wg trybu kategorii), aktualizuje status
- * i loguje do crm_history. `origin` = baza publicznych linków do plików.
+ * Klucz idempotencji: wiadomość + runda prób (MAX_ATTEMPTS prób na rundę).
+ * W obrębie rundy klucz się nie zmienia, więc ponowienie po błędzie sieci, 5xx
+ * czy awarii między wysyłką a zapisem statusu nie wyśle drugiego maila — Resend
+ * zwróci pierwotną odpowiedź. Nowa runda (ręczne „Ponów nieudane”) = nowy klucz.
+ */
+function idempotencyKeyFor(messageId: string, attempt: number): string {
+	return `aura-hub/${messageId}/${Math.ceil(Math.max(attempt, 1) / MAX_ATTEMPTS)}`;
+}
+
+/** Licznik prób przesunięty na koniec rundy: kolejne przejęcie zacznie nową rundę (nowy klucz). */
+export function attemptsToRoundEnd(attempts: number): number {
+	return Math.ceil(Math.max(attempts, 1) / MAX_ATTEMPTS) * MAX_ATTEMPTS;
+}
+
+/**
+ * Ostatnia kontrola tuż przed wywołaniem Resend. Bramka przy kolejkowaniu nie
+ * wystarcza: wiadomości zakolejkowane wcześniej (albo przez dwa równoległe
+ * przebiegi) nie przeszły przez dzisiejsze reguły. Zwraca powód wstrzymania albo null.
+ */
+async function recipientHoldReason(
+	db: SupabaseClient,
+	message: Record<string, unknown>
+): Promise<string | null> {
+	const { data, error } = await db
+		.from('email_messages')
+		.select('id, status, campaign_id, category_id, complained_at')
+		.ilike('to_email', escapeLike(normalizeEmail(message.to_email as string)))
+		.neq('id', message.id as string)
+		.limit(1000);
+	if (error) throw new Error(`kontrola odbiorcy: ${error.message}`);
+	const rows = (data ?? []) as {
+		id: string;
+		status: string;
+		campaign_id: string | null;
+		category_id: string | null;
+		complained_at: string | null;
+	}[];
+
+	if (rows.some((r) => r.status === 'bounced' || r.complained_at)) return BLOCKED_REASON;
+
+	// Duplikat: ten sam adres już dostał tę kampanię (wiadomość kampanijna) albo tę
+	// sekcję (automat, „do wszystkich”). Równoległy egzemplarz w 'sending' wygrywa
+	// tylko z mniejszym id — inaczej oba wstrzymałyby się nawzajem.
+	const sameScope = (r: (typeof rows)[number]) =>
+		message.campaign_id ? r.campaign_id === message.campaign_id : r.category_id === message.category_id;
+	const taken = rows.some(
+		(r) =>
+			sameScope(r) &&
+			(r.status === 'sent' || (r.status === 'sending' && r.id < (message.id as string)))
+	);
+	return taken ? DUPLICATE_REASON : null;
+}
+
+/**
+ * Wysyła pojedynczą wiadomość: szablon Resend kategorii + pliki (załączniki
+ * albo linki wg trybu kategorii), aktualizuje status i loguje do crm_history.
+ * `origin` = baza publicznych linków do plików. `queue: true` (processQueue)
+ * włącza kontrolę odbiorcy; szybka wysyłka 1-do-1 jej nie ma, bo to świadoma
+ * decyzja operatora.
  */
 export async function sendMessageNow(
 	db: SupabaseClient,
 	messageId: string,
-	origin: string
+	origin: string,
+	opts: { queue?: boolean } = {}
 ): Promise<SendOutcome> {
 	const { data: current, error: loadError } = await db
 		.from('email_messages')
@@ -324,15 +383,48 @@ export async function sendMessageNow(
 	const message = await claimMessage(db, messageId, current.attempts as number);
 	if (!message) return { ok: false, skipped: true, error: 'Wiadomość już przetworzona' };
 	const attempt = message.attempts as number;
+	const previousError = (current.error as string | null) ?? '';
 
 	const fail = async (errorText: string): Promise<SendOutcome> => {
-		const permanent = attempt >= MAX_ATTEMPTS;
+		// Ostatnia próba rundy kończy się 'failed'; „Ponów nieudane” zaczyna kolejną rundę.
+		const permanent = attempt % MAX_ATTEMPTS === 0;
 		await db
 			.from('email_messages')
 			.update({ status: permanent ? 'failed' : 'queued', error: errorText })
 			.eq('id', messageId);
 		return { ok: false, error: errorText };
 	};
+	// 429 to limit konta, nie wina wiadomości: wracamy do kolejki bez zużycia próby.
+	// Drugie 429 z rzędu na tej samej wiadomości już zużywa próbę — gdyby Resend
+	// zapamiętał 429 pod kluczem idempotencji, kolejka nie stanie na niej na dobę.
+	const rateLimited = async (errorText: string): Promise<SendOutcome> => {
+		if (previousError.includes('HTTP 429')) {
+			await fail(errorText);
+		} else {
+			await db
+				.from('email_messages')
+				.update({ status: 'queued', attempts: attempt - 1, error: errorText })
+				.eq('id', messageId);
+		}
+		return { ok: false, error: errorText, rateLimited: true };
+	};
+	const withhold = async (reason: string): Promise<SendOutcome> => {
+		await db
+			.from('email_messages')
+			.update({ status: 'skipped', error: reason, attempts: attempt - 1 })
+			.eq('id', messageId);
+		return { ok: false, skipped: true, withheld: true, error: reason };
+	};
+
+	if (opts.queue) {
+		let holdReason: string | null;
+		try {
+			holdReason = await recipientHoldReason(db, message);
+		} catch (e) {
+			return fail(e instanceof Error ? e.message : String(e));
+		}
+		if (holdReason) return withhold(holdReason);
+	}
 
 	const { data: category } = await db
 		.from('email_categories')
@@ -341,15 +433,22 @@ export async function sendMessageNow(
 		.maybeSingle();
 	if (!category) return fail('Wiadomość nie ma przypisanej kategorii');
 
-	let campaign: { name: string | null; subject: string | null; from_email: string | null } | null =
-		null;
+	let campaign: {
+		name: string | null;
+		subject: string | null;
+		from_email: string | null;
+		status: string;
+	} | null = null;
 	if (message.campaign_id) {
 		const { data } = await db
 			.from('email_campaigns')
-			.select('name, subject, from_email')
+			.select('name, subject, from_email, status')
 			.eq('id', message.campaign_id)
 			.maybeSingle();
 		campaign = data;
+		// Wiadomość, która była „w locie” przy anulowaniu, wraca do kolejki przez 429,
+		// błąd albo odzyskiwanie — anulowana kampania nie może jej już wysłać.
+		if (campaign?.status === 'canceled') return withhold(CANCELED_REASON);
 	}
 
 	// Treść z Edytora HUB ma pierwszeństwo: gdy sekcja ma własny html_body,
@@ -360,11 +459,16 @@ export async function sendMessageNow(
 
 	// Nadawca: kampania → sekcja → nadawca zapisany w szablonie Resend → RESEND_FROM.
 	// Bez kroku z szablonem RESEND_FROM nadpisywał nadawcę szablonu i newsletter
-	// jednej marki wychodził z adresu innej.
-	const templateFrom =
-		!campaign?.from_email && !category.from_email && templateId
-			? await resendTemplateFrom(templateId)
-			: null;
+	// jednej marki wychodził z adresu innej. Nieudany odczyt szablonu NIE spada na
+	// RESEND_FROM — wiadomość czeka na kolejną próbę.
+	let templateFrom: string | null = null;
+	if (!campaign?.from_email && !category.from_email && templateId) {
+		const template = await getResendTemplate(templateId);
+		if (!template.ok) {
+			return template.rateLimited ? rateLimited(template.error) : fail(template.error);
+		}
+		templateFrom = template.info.from;
+	}
 	const from = campaign?.from_email || category.from_email || templateFrom || env.RESEND_FROM;
 	if (!from) return fail('Brak adresu nadawcy (RESEND_FROM / kategoria / kampania)');
 	const subject = campaign?.subject || category.subject || undefined;
@@ -378,10 +482,7 @@ export async function sendMessageNow(
 	if (attachError) return fail(attachError);
 
 	const messageVars = (message.variables_json ?? {}) as Record<string, string>;
-	// Klucz idempotencji zależy od numeru próby: po odrzuceniu przez Resend kolejna
-	// próba dostaje nowy klucz, a po awarii między wysyłką a zapisem statusu
-	// (odzyskiwanie w processQueue oddaje próbę) — ten sam, więc Resend nie wyśle duplikatu.
-	const idempotencyKey = `aura-hub/${messageId}/${attempt}`;
+	const idempotencyKey = idempotencyKeyFor(messageId, attempt);
 
 	let result;
 	if (htmlBody) {
@@ -428,14 +529,7 @@ export async function sendMessageNow(
 		});
 	}
 	if (!result.ok) {
-		if (result.rateLimited) {
-			// 429 to limit konta, nie wina wiadomości: wracamy do kolejki bez zużycia próby.
-			await db
-				.from('email_messages')
-				.update({ status: 'queued', attempts: attempt - 1, error: result.error ?? null })
-				.eq('id', messageId);
-			return { ok: false, error: result.error, rateLimited: true };
-		}
+		if (result.rateLimited) return rateLimited(result.error ?? 'Resend HTTP 429');
 		return fail(result.error ?? 'Nieznany błąd Resend');
 	}
 
@@ -1085,23 +1179,21 @@ export async function enqueueAutoSend(db: SupabaseClient): Promise<AutoSendResul
 		});
 		if (candidates.length === 0) continue;
 
-		// Obsłużony = jakakolwiek wcześniejsza wiadomość tej sekcji poza pominiętą,
-		// także nieudana albo odbita. Inaczej każdy przebieg crona kolejkowałby
-		// odbity adres od nowa. Sprawdzamy po karcie CRM i po adresie.
+		// Obsłużony = jakakolwiek wcześniejsza wiadomość tej sekcji, w dowolnym statusie
+		// (także nieudana, odbita albo wstrzymana przy wysyłce). Inaczej każdy przebieg
+		// crona kolejkowałby taki kontakt od nowa. Sprawdzamy po karcie CRM i po adresie.
 		const emails = [...new Set(candidates.map((c) => (c.email ?? '').trim()).filter(Boolean))];
 		const [byCompany, byEmail] = await Promise.all([
 			db
 				.from('email_messages')
 				.select('company_id, to_email')
 				.eq('category_id', categoryId)
-				.neq('status', 'skipped')
 				.in('company_id', candidates.map((c) => c.id)),
 			emails.length > 0
 				? db
 						.from('email_messages')
 						.select('company_id, to_email')
 						.eq('category_id', categoryId)
-						.neq('status', 'skipped')
 						.in('to_email', emails)
 				: Promise.resolve({ data: [], error: null })
 		]);
@@ -1183,14 +1275,25 @@ async function reviveStuckMessages(db: SupabaseClient): Promise<void> {
 	const unsafeBefore = Date.now() - IDEMPOTENCY_SAFE_HOURS * 3_600_000;
 	for (const row of stuck) {
 		const claimedMs = row.claimed_at ? Date.parse(row.claimed_at as string) : NaN;
+		const attempts = row.attempts as number;
 		const update =
 			Number.isFinite(claimedMs) && claimedMs > unsafeBefore
-				? { status: 'queued', attempts: Math.max(0, (row.attempts as number) - 1) }
+				? { status: 'queued', attempts: Math.max(0, attempts - 1) }
 				: {
 						status: 'failed',
-						error: 'Niepewny stan po awarii wysyłki — sprawdź w Resend, czy mail wyszedł'
+						error: 'Niepewny stan po awarii wysyłki — sprawdź w Resend, czy mail wyszedł',
+						// „Ponów nieudane” zacznie nową rundę, czyli nowy klucz idempotencji.
+						attempts: attemptsToRoundEnd(attempts)
 					};
-		await db.from('email_messages').update(update).eq('id', row.id).eq('status', 'sending');
+		// Warunki z odczytu powtórzone w zapisie: wiadomość przejęta w międzyczasie
+		// przez inny przebieg (świeży claimed_at, inny licznik) nie może wrócić do kolejki.
+		await db
+			.from('email_messages')
+			.update(update)
+			.eq('id', row.id)
+			.eq('status', 'sending')
+			.eq('attempts', attempts)
+			.or(`claimed_at.is.null,claimed_at.lt."${staleBefore}"`);
 	}
 	console.warn(`odzyskano ${stuck.length} zawieszonych wiadomości z 'sending'`);
 }
@@ -1203,20 +1306,23 @@ async function reviveStuckMessages(db: SupabaseClient): Promise<void> {
 export async function closeFinishedCampaigns(db: SupabaseClient): Promise<void> {
 	const { data: open } = await db.from('email_campaigns').select('id').eq('status', 'sending');
 	for (const campaign of open ?? []) {
-		const { count } = await db
+		// Błąd zapytania to nie „zero w kolejce” — wtedy kampanii nie ruszamy.
+		const pending = await db
 			.from('email_messages')
 			.select('id', { count: 'exact', head: true })
 			.eq('campaign_id', campaign.id)
 			.in('status', ['queued', 'sending']);
-		if ((count ?? 0) > 0) continue;
-		const { count: sentCount } = await db
+		if (pending.error || pending.count !== 0) continue;
+		const delivered = await db
 			.from('email_messages')
 			.select('id', { count: 'exact', head: true })
 			.eq('campaign_id', campaign.id)
 			.in('status', ['sent', 'bounced']);
+		if (delivered.error || delivered.count === null) continue;
+		const sentCount = delivered.count;
 		await db
 			.from('email_campaigns')
-			.update({ status: (sentCount ?? 0) > 0 ? 'sent' : 'failed' })
+			.update({ status: sentCount > 0 ? 'sent' : 'failed' })
 			.eq('id', campaign.id)
 			.eq('status', 'sending');
 	}
@@ -1231,6 +1337,8 @@ export interface ProcessResult {
 	dailyLimitReached?: boolean;
 	/** Resend odpowiedział 429 — partię przerwano, reszta pójdzie w kolejnym przebiegu. */
 	rateLimited?: boolean;
+	/** Wstrzymane przez kontrolę odbiorcy (blokada, duplikat, anulowana kampania). */
+	withheld: number;
 }
 
 /**
@@ -1281,7 +1389,7 @@ export async function processQueue(
 		}
 	}
 
-	const result: ProcessResult = { processed: 0, sent: 0, failed: 0, requeued: 0 };
+	const result: ProcessResult = { processed: 0, sent: 0, failed: 0, requeued: 0, withheld: 0 };
 
 	// Dzienny limit — liczony na realnie wysłanych dziś (doba warszawska) mailach.
 	const sentTodayRes = await db
@@ -1323,7 +1431,8 @@ export async function processQueue(
 
 	for (const [index, row] of batch.entries()) {
 		if (index > 0) await sleep(SEND_DELAY_MS);
-		const outcome = await sendMessageNow(db, row.id, origin);
+		const outcome = await sendMessageNow(db, row.id, origin, { queue: true });
+		if (outcome.withheld) result.withheld++;
 		if (outcome.skipped) continue;
 		result.processed++;
 		if (outcome.ok) result.sent++;
@@ -1353,9 +1462,16 @@ export interface QueueHealth {
 	queued: number;
 	/** Ostatnie przejęcie wiadomości do wysyłki (cron, przycisk albo szybka wysyłka). */
 	lastActivityAt: string | null;
-	/** Kolejka nie jest pusta, a od ponad STALL_MINUTES nikt nic z niej nie wziął. */
+	/** Kampanie zaplanowane, którym termin minął ponad STALL_MINUTES temu. */
+	overdueScheduled: number;
+	/**
+	 * Silnik stoi: kolejka nie jest pusta i od STALL_MINUTES nic z niej nie wyszło
+	 * (licząc od najmłodszego z: ostatniej wysyłki, najstarszej czekającej wiadomości),
+	 * albo zaplanowana kampania nie wystartowała. Ręczna wysyłka maskuje awarię
+	 * crona na kilka minut — to świadome uproszczenie bez osobnego „heartbeatu”.
+	 */
 	stalled: boolean;
-	/** Szacowany czas opróżnienia kolejki przy działającym cronie (minuty). */
+	/** Szacowany czas opróżnienia całej kolejki przy działającym cronie (minuty). */
 	etaMinutes: number;
 }
 
@@ -1369,7 +1485,8 @@ const CRON_RUNS_PER_HOUR = 60;
  * crona była kampania, która „sama z siebie” przestawała iść.
  */
 export async function queueHealth(db: SupabaseClient): Promise<QueueHealth> {
-	const [queuedRes, lastRes] = await Promise.all([
+	const stallBefore = new Date(Date.now() - STALL_MINUTES * 60_000).toISOString();
+	const [queuedRes, lastRes, oldestRes, overdueRes] = await Promise.all([
 		db.from('email_messages').select('id', { count: 'exact', head: true }).eq('status', 'queued'),
 		db
 			.from('email_messages')
@@ -1377,16 +1494,32 @@ export async function queueHealth(db: SupabaseClient): Promise<QueueHealth> {
 			.not('claimed_at', 'is', null)
 			.order('claimed_at', { ascending: false })
 			.limit(1)
-			.maybeSingle()
+			.maybeSingle(),
+		db
+			.from('email_messages')
+			.select('created_at')
+			.eq('status', 'queued')
+			.order('created_at', { ascending: true })
+			.limit(1)
+			.maybeSingle(),
+		db
+			.from('email_campaigns')
+			.select('id', { count: 'exact', head: true })
+			.eq('status', 'scheduled')
+			.lt('scheduled_at', stallBefore)
 	]);
 	const queued = queuedRes.count ?? 0;
 	const lastActivityAt = (lastRes.data?.claimed_at as string | null | undefined) ?? null;
 	const lastMs = lastActivityAt ? Date.parse(lastActivityAt) : 0;
+	const oldestMs = oldestRes.data?.created_at ? Date.parse(oldestRes.data.created_at as string) : 0;
+	const overdueScheduled = overdueRes.count ?? 0;
 	const batchCap = Number(env.QUEUE_BATCH_SIZE ?? '') || 20;
+	const idleMs = Date.now() - Math.max(lastMs, oldestMs);
 	return {
 		queued,
 		lastActivityAt,
-		stalled: queued > 0 && Date.now() - lastMs > STALL_MINUTES * 60_000,
+		overdueScheduled,
+		stalled: (queued > 0 && idleMs > STALL_MINUTES * 60_000) || overdueScheduled > 0,
 		etaMinutes: Math.ceil((queued / (batchCap * CRON_RUNS_PER_HOUR)) * 60)
 	};
 }

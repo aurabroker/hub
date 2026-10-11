@@ -85,7 +85,7 @@ export const actions: Actions = {
 		try {
 			const result = await processQueue(adminClient(), url.origin, 20);
 			return {
-				processed: `Partia przetworzona: wysłane ${result.sent}, błędy ${result.failed}, ponowienia ${result.requeued}${result.rateLimited ? ' (Resend: limit zapytań — reszta w kolejnej partii)' : ''}`
+				processed: `Partia przetworzona: wysłane ${result.sent}, błędy ${result.failed}, ponowienia ${result.requeued}, wstrzymane (duplikat / blokada) ${result.withheld}${result.rateLimited ? ' (Resend: limit zapytań — reszta w kolejnej partii)' : ''}`
 			};
 		} catch (e) {
 			return fail(500, { error: e instanceof Error ? e.message : String(e) });

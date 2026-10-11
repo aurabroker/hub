@@ -34,10 +34,16 @@
 
 {#if data.health.stalled}
 	<div class="alert alert-warning">
-		<strong>Kolejka stoi.</strong> Czeka {data.health.queued} wiadomości, ostatnia wysyłka:
-		{data.health.lastActivityAt ? fmtDateTime(data.health.lastActivityAt) : 'brak'}. Automatyczna
-		wysyłka (Worker <span class="mono">aura-hub-queue-cron</span>) nie działa — kampanie, automat
-		i wysyłki „do wszystkich” idą tylko po ręcznym „Przetwórz partię”.
+		<strong>Kolejka stoi.</strong>
+		{#if data.health.queued > 0}
+			Czeka {data.health.queued} wiadomości, ostatnia wysyłka:
+			{data.health.lastActivityAt ? fmtDateTime(data.health.lastActivityAt) : 'brak'}.
+		{/if}
+		{#if data.health.overdueScheduled > 0}
+			Zaplanowanym kampaniom ({data.health.overdueScheduled}) minął termin, a nie wystartowały.
+		{/if}
+		Automatyczna wysyłka (Worker <span class="mono">aura-hub-queue-cron</span>) nie działa — kampanie,
+		automat i wysyłki „do wszystkich” idą tylko po ręcznym „Przetwórz partię”.
 	</div>
 {/if}
 

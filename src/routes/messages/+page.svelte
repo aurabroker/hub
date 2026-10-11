@@ -30,7 +30,7 @@
 	uzupełniają się po zdarzeniach z webhooka Resend.
 </p>
 
-{#if data.health.queued > 0}
+{#if data.health.queued > 0 || data.health.stalled}
 	<div
 		class="card"
 		style="display: flex; gap: var(--space-3); align-items: center; justify-content: space-between; flex-wrap: wrap"

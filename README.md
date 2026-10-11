@@ -112,12 +112,21 @@ jest wpis `crm_history` (`type='email'`). Migracja dotyczy wyłącznie modułu e
 
 > ### Duplikaty i awarie
 >
-> Każde wywołanie Resend niesie nagłówek `Idempotency-Key` (`aura-hub/{id}/{próba}`).
-> Gdy funkcja padnie po wysyłce, a przed zapisem statusu, wiadomość zostaje w `sending`;
-> po 15 min wraca do kolejki **z oddaną próbą**, więc z tym samym kluczem, a Resend zamiast
-> drugiego maila zwraca pierwotną odpowiedź. Klucz żyje 24 h — starsze zawieszone
-> wiadomości dostają `failed` z prośbą o sprawdzenie w Resend. Odpowiedź 429 nie zużywa
-> próby i przerywa partię.
+> **Kontrola tuż przed wysyłką** (`recipientHoldReason`): przy każdej wiadomości z kolejki
+> HUB sprawdza, czy adres nie odbił wcześniej maila ani nie zgłosił spamu i czy nie dostał
+> już tej kampanii (dla automatu i „do wszystkich”: tej sekcji). Taka wiadomość dostaje
+> `skipped` z powodem zamiast wysyłki. Bramka przy kolejkowaniu nie wystarcza — kolejka
+> potrafi czekać godzinami, a wiadomości zakolejkowane przed zmianą reguł też muszą przez
+> nie przejść. Szybka wysyłka 1-do-1 tej kontroli nie ma (świadoma decyzja operatora).
+>
+> Każde wywołanie Resend niesie `Idempotency-Key` = wiadomość + **runda** prób
+> (`aura-hub/{id}/{runda}`, 3 próby na rundę). W obrębie rundy klucz się nie zmienia, więc
+> ponowienie po błędzie sieci, 5xx albo awarii między wysyłką a zapisem statusu nie wyśle
+> drugiego maila. Zawieszona w `sending` wiadomość wraca po 15 min z oddaną próbą; po 23 h
+> (klucz żyje 24 h) dostaje `failed` z prośbą o sprawdzenie w Resend. „Ponów nieudane” nie
+> zeruje licznika, tylko zaczyna nową rundę — z nowym kluczem, więc naprawdę wysyła.
+> Odpowiedź 429 nie zużywa próby i przerywa partię. Nieudany odczyt szablonu Resend (nadawca)
+> nie spada po cichu na `RESEND_FROM` — wiadomość czeka na kolejną próbę.
 
 ## Resend — konfiguracja
 
