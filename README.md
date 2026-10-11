@@ -114,10 +114,17 @@ jest wpis `crm_history` (`type='email'`). Migracja dotyczy wyłącznie modułu e
 >
 > **Kontrola tuż przed wysyłką** (`recipientHoldReason`): przy każdej wiadomości z kolejki
 > HUB sprawdza, czy adres nie odbił wcześniej maila ani nie zgłosił spamu i czy nie dostał
-> już tej kampanii (dla automatu i „do wszystkich”: tej sekcji). Taka wiadomość dostaje
-> `skipped` z powodem zamiast wysyłki. Bramka przy kolejkowaniu nie wystarcza — kolejka
-> potrafi czekać godzinami, a wiadomości zakolejkowane przed zmianą reguł też muszą przez
-> nie przejść. Szybka wysyłka 1-do-1 tej kontroli nie ma (świadoma decyzja operatora).
+> już tej kampanii (dla automatu i „do wszystkich”: tej sekcji). Z kilku czekających kopii
+> tego samego adresu wychodzi ta z najmniejszym id — także przy dwóch równoległych
+> przebiegach. Automat nie wysyła powitań starszych niż `AUTO_SEND_MAX_AGE_DAYS` (14 dni).
+> Taka wiadomość dostaje `skipped` z powodem zamiast wysyłki. Bramka przy kolejkowaniu nie
+> wystarcza — kolejka potrafi czekać godzinami, a wiadomości zakolejkowane przed zmianą
+> reguł też muszą przez nie przejść. Szybka wysyłka 1-do-1 nie jest blokowana historią
+> wysłanych (świadoma decyzja operatora), tylko blokadą adresu i równoległą kopią.
+>
+> **Martwy link wypisu wstrzymuje wysyłkę.** Jeśli szablon Resend zawiera
+> `{{{RESEND_UNSUBSCRIBE_URL}}}`, wiadomości z kolejki czekają (bez zużycia prób), aż szablon
+> zostanie poprawiony na `{{{link_wypisu}}}` i opublikowany. Strona kampanii mówi to wprost.
 >
 > Każde wywołanie Resend niesie `Idempotency-Key` = wiadomość + **runda** prób
 > (`aura-hub/{id}/{runda}`, 3 próby na rundę). W obrębie rundy klucz się nie zmienia, więc
@@ -125,8 +132,9 @@ jest wpis `crm_history` (`type='email'`). Migracja dotyczy wyłącznie modułu e
 > drugiego maila. Zawieszona w `sending` wiadomość wraca po 15 min z oddaną próbą; po 23 h
 > (klucz żyje 24 h) dostaje `failed` z prośbą o sprawdzenie w Resend. „Ponów nieudane” nie
 > zeruje licznika, tylko zaczyna nową rundę — z nowym kluczem, więc naprawdę wysyła.
-> Odpowiedź 429 nie zużywa próby i przerywa partię. Nieudany odczyt szablonu Resend (nadawca)
-> nie spada po cichu na `RESEND_FROM` — wiadomość czeka na kolejną próbę.
+> Odpowiedź 429 (limit na sekundę, dzienny albo miesięczny) nie zużywa próby i przerywa
+> partię. Nieudany odczyt szablonu Resend (nadawca) nie spada po cichu na `RESEND_FROM` —
+> wiadomość czeka na kolejną próbę.
 
 ## Resend — konfiguracja
 

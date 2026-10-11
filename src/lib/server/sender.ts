@@ -29,6 +29,11 @@ const STALE_SENDING_MINUTES = 15;
  * ponowienie wysłałoby drugi egzemplarz.
  */
 const IDEMPOTENCY_SAFE_HOURS = 23;
+/**
+ * Automat odpowiada wyłącznie na świeże zapisy. Mail powitalny po miesiącu jest
+ * bardziej dziwny niż pomocny, a okno ogranicza też, ile CRM czytamy co minutę.
+ */
+const AUTO_SEND_MAX_AGE_DAYS = Number(env.AUTO_SEND_MAX_AGE_DAYS ?? '') || 14;
 /** Base64 dokłada ~33%; cała wiadomość ma limit 40 MB. */
 const MAX_ATTACHMENT_TOTAL_BYTES = 28 * 1024 * 1024;
 
@@ -129,6 +134,9 @@ export async function loadBlockedEmails(db: SupabaseClient): Promise<Set<string>
 export const BLOCKED_REASON = 'Adres wcześniej odbił maila albo zgłosił spam';
 export const DUPLICATE_REASON = 'Ten sam adres jest już w tej wysyłce';
 export const CANCELED_REASON = 'Kampania anulowana';
+export const TOO_LATE_REASON = 'Za późno na automatyczną odpowiedź na zapis';
+export const DEAD_UNSUBSCRIBE_HOLD =
+	'Wstrzymane: szablon Resend ma martwy link wypisu ({{{RESEND_UNSUBSCRIBE_URL}}}) — zamień go na {{{link_wypisu}}} i opublikuj szablon';
 
 export async function loadActiveCategories(db: SupabaseClient): Promise<EmailCategory[]> {
 	const { data, error } = await db
@@ -304,6 +312,8 @@ export interface SendOutcome {
 	rateLimited?: boolean;
 	/** Kontrola odbiorcy przed wysyłką zdjęła wiadomość (blokada, duplikat, anulowana kampania). */
 	withheld?: boolean;
+	/** Wiadomość czeka w kolejce na poprawkę szablonu (martwy link wypisu). */
+	held?: boolean;
 }
 
 /**
@@ -330,33 +340,50 @@ async function recipientHoldReason(
 	db: SupabaseClient,
 	message: Record<string, unknown>
 ): Promise<string | null> {
+	if (message.source === 'auto') {
+		const createdMs = Date.parse(message.created_at as string);
+		if (Date.now() - createdMs > AUTO_SEND_MAX_AGE_DAYS * 86_400_000) return TOO_LATE_REASON;
+	}
+
+	const address = normalizeEmail(message.to_email as string);
 	const { data, error } = await db
 		.from('email_messages')
-		.select('id, status, campaign_id, category_id, complained_at')
-		.ilike('to_email', escapeLike(normalizeEmail(message.to_email as string)))
+		.select('id, to_email, status, campaign_id, category_id, complained_at')
+		.ilike('to_email', escapeLike(address))
 		.neq('id', message.id as string)
 		.limit(1000);
 	if (error) throw new Error(`kontrola odbiorcy: ${error.message}`);
-	const rows = (data ?? []) as {
-		id: string;
-		status: string;
-		campaign_id: string | null;
-		category_id: string | null;
-		complained_at: string | null;
-	}[];
+	// ILIKE to tylko wstępne sito: PostgREST zamienia '*' na '%', więc dokładne
+	// porównanie adresu robimy tutaj.
+	const rows = (
+		(data ?? []) as {
+			id: string;
+			to_email: string;
+			status: string;
+			campaign_id: string | null;
+			category_id: string | null;
+			complained_at: string | null;
+		}[]
+	).filter((r) => normalizeEmail(r.to_email) === address);
 
 	if (rows.some((r) => r.status === 'bounced' || r.complained_at)) return BLOCKED_REASON;
 
-	// Duplikat: ten sam adres już dostał tę kampanię (wiadomość kampanijna) albo tę
-	// sekcję (automat, „do wszystkich”). Równoległy egzemplarz w 'sending' wygrywa
-	// tylko z mniejszym id — inaczej oba wstrzymałyby się nawzajem.
-	const sameScope = (r: (typeof rows)[number]) =>
-		message.campaign_id ? r.campaign_id === message.campaign_id : r.category_id === message.category_id;
-	const taken = rows.some(
-		(r) =>
-			sameScope(r) &&
-			(r.status === 'sent' || (r.status === 'sending' && r.id < (message.id as string)))
-	);
+	// Duplikat: ten sam adres w tej kampanii (wiadomość kampanijna) albo w tej
+	// sekcji (automat, „do wszystkich”). Spośród żywych egzemplarzy wygrywa ten
+	// z najmniejszym id, niezależnie od kolejności przebiegów — dwa równoległe
+	// przebiegi nie wyślą obu, a żaden adres nie zostanie bez egzemplarza.
+	// Szybka wysyłka 1-do-1 (ponawiana przez kolejkę po błędzie) to świadoma
+	// decyzja operatora: historia wysłanych jej nie blokuje, tylko równoległe kopie.
+	const manual = message.source === 'quick_send' && !message.campaign_id;
+	const inScope = (r: (typeof rows)[number]) =>
+		message.campaign_id
+			? r.campaign_id === message.campaign_id
+			: r.category_id === message.category_id;
+	const taken = rows.some((r) => {
+		if (!inScope(r)) return false;
+		if (r.status === 'sent') return !manual;
+		return (r.status === 'queued' || r.status === 'sending') && r.id < (message.id as string);
+	});
 	return taken ? DUPLICATE_REASON : null;
 }
 
@@ -383,7 +410,6 @@ export async function sendMessageNow(
 	const message = await claimMessage(db, messageId, current.attempts as number);
 	if (!message) return { ok: false, skipped: true, error: 'Wiadomość już przetworzona' };
 	const attempt = message.attempts as number;
-	const previousError = (current.error as string | null) ?? '';
 
 	const fail = async (errorText: string): Promise<SendOutcome> => {
 		// Ostatnia próba rundy kończy się 'failed'; „Ponów nieudane” zaczyna kolejną rundę.
@@ -394,18 +420,16 @@ export async function sendMessageNow(
 			.eq('id', messageId);
 		return { ok: false, error: errorText };
 	};
-	// 429 to limit konta, nie wina wiadomości: wracamy do kolejki bez zużycia próby.
-	// Drugie 429 z rzędu na tej samej wiadomości już zużywa próbę — gdyby Resend
-	// zapamiętał 429 pod kluczem idempotencji, kolejka nie stanie na niej na dobę.
+	// Wracamy do kolejki bez zużycia próby: 429 to limit konta (także dzienny czy
+	// miesięczny), nie wina wiadomości, a ten sam szablon może wstrzymać wiele wiadomości.
+	const giveBack = async (errorText: string) => {
+		await db
+			.from('email_messages')
+			.update({ status: 'queued', attempts: attempt - 1, error: errorText })
+			.eq('id', messageId);
+	};
 	const rateLimited = async (errorText: string): Promise<SendOutcome> => {
-		if (previousError.includes('HTTP 429')) {
-			await fail(errorText);
-		} else {
-			await db
-				.from('email_messages')
-				.update({ status: 'queued', attempts: attempt - 1, error: errorText })
-				.eq('id', messageId);
-		}
+		await giveBack(errorText);
 		return { ok: false, error: errorText, rateLimited: true };
 	};
 	const withhold = async (reason: string): Promise<SendOutcome> => {
@@ -462,12 +486,18 @@ export async function sendMessageNow(
 	// jednej marki wychodził z adresu innej. Nieudany odczyt szablonu NIE spada na
 	// RESEND_FROM — wiadomość czeka na kolejną próbę.
 	let templateFrom: string | null = null;
-	if (!campaign?.from_email && !category.from_email && templateId) {
+	if (templateId) {
 		const template = await getResendTemplate(templateId);
 		if (!template.ok) {
 			return template.rateLimited ? rateLimited(template.error) : fail(template.error);
 		}
 		templateFrom = template.info.from;
+		// Marketing bez działającego linku wypisu nie wychodzi: wiadomość czeka
+		// (bez zużycia próby), aż szablon zostanie poprawiony w Resend.
+		if (template.info.deadUnsubscribeLink && opts.queue) {
+			await giveBack(DEAD_UNSUBSCRIBE_HOLD);
+			return { ok: false, error: DEAD_UNSUBSCRIBE_HOLD, held: true };
+		}
 	}
 	const from = campaign?.from_email || category.from_email || templateFrom || env.RESEND_FROM;
 	if (!from) return fail('Brak adresu nadawcy (RESEND_FROM / kategoria / kampania)');
@@ -1100,11 +1130,6 @@ export async function enqueueCategoryBlast(
 
 /** Dobowy limit maili wysyłanych automatem (osobny od kampanii/ręcznych). */
 export const AUTO_SEND_DAILY_LIMIT = Number(env.AUTO_SEND_DAILY_LIMIT ?? '') || 100;
-/**
- * Automat odpowiada wyłącznie na świeże zapisy. Mail powitalny po miesiącu jest
- * bardziej dziwny niż pomocny, a okno ogranicza też, ile CRM czytamy co minutę.
- */
-const AUTO_SEND_MAX_AGE_DAYS = Number(env.AUTO_SEND_MAX_AGE_DAYS ?? '') || 14;
 
 export interface AutoSendResult {
 	enqueued: number;
@@ -1179,21 +1204,25 @@ export async function enqueueAutoSend(db: SupabaseClient): Promise<AutoSendResul
 		});
 		if (candidates.length === 0) continue;
 
-		// Obsłużony = jakakolwiek wcześniejsza wiadomość tej sekcji, w dowolnym statusie
-		// (także nieudana, odbita albo wstrzymana przy wysyłce). Inaczej każdy przebieg
-		// crona kolejkowałby taki kontakt od nowa. Sprawdzamy po karcie CRM i po adresie.
+		// Obsłużony = wcześniejsza wiadomość tej sekcji, która nie została pominięta
+		// (także nieudana albo odbita), albo dowolna wiadomość automatu — również
+		// wstrzymana przy wysyłce, inaczej każdy przebieg crona kolejkowałby ją od nowa.
+		// Pominięte wiersze kampanii (brak zgody, anulowanie) nie blokują powitania.
+		// Sprawdzamy po karcie CRM i po adresie.
 		const emails = [...new Set(candidates.map((c) => (c.email ?? '').trim()).filter(Boolean))];
 		const [byCompany, byEmail] = await Promise.all([
 			db
 				.from('email_messages')
 				.select('company_id, to_email')
 				.eq('category_id', categoryId)
+				.or('status.neq.skipped,source.eq.auto')
 				.in('company_id', candidates.map((c) => c.id)),
 			emails.length > 0
 				? db
 						.from('email_messages')
 						.select('company_id, to_email')
 						.eq('category_id', categoryId)
+						.or('status.neq.skipped,source.eq.auto')
 						.in('to_email', emails)
 				: Promise.resolve({ data: [], error: null })
 		]);
@@ -1339,6 +1368,8 @@ export interface ProcessResult {
 	rateLimited?: boolean;
 	/** Wstrzymane przez kontrolę odbiorcy (blokada, duplikat, anulowana kampania). */
 	withheld: number;
+	/** Czekają na poprawkę szablonu Resend (martwy link wypisu). */
+	held: number;
 }
 
 /**
@@ -1389,7 +1420,14 @@ export async function processQueue(
 		}
 	}
 
-	const result: ProcessResult = { processed: 0, sent: 0, failed: 0, requeued: 0, withheld: 0 };
+	const result: ProcessResult = {
+		processed: 0,
+		sent: 0,
+		failed: 0,
+		requeued: 0,
+		withheld: 0,
+		held: 0
+	};
 
 	// Dzienny limit — liczony na realnie wysłanych dziś (doba warszawska) mailach.
 	const sentTodayRes = await db
@@ -1434,6 +1472,10 @@ export async function processQueue(
 		const outcome = await sendMessageNow(db, row.id, origin, { queue: true });
 		if (outcome.withheld) result.withheld++;
 		if (outcome.skipped) continue;
+		if (outcome.held) {
+			result.held++;
+			continue;
+		}
 		result.processed++;
 		if (outcome.ok) result.sent++;
 		else if (outcome.rateLimited) {

@@ -66,6 +66,7 @@ export const load: PageServerLoad = async ({ params, url }) => {
 		source: 'RESEND_FROM'
 	};
 	let deadUnsubscribeLink = false;
+	let templateError: string | null = null;
 	if (campaign.from_email) sender = { address: campaign.from_email, source: 'kampania' };
 	else if (category?.from_email) sender = { address: category.from_email, source: 'sekcja' };
 	if (category?.resend_template_id && !category.html_body?.trim()) {
@@ -74,6 +75,13 @@ export const load: PageServerLoad = async ({ params, url }) => {
 			deadUnsubscribeLink = template.info.deadUnsubscribeLink;
 			if (!campaign.from_email && !category.from_email && template.info.from) {
 				sender = { address: template.info.from, source: 'szablon Resend' };
+			}
+		} else {
+			// Wysyłka w tej sytuacji czeka (nie spada na RESEND_FROM), więc panel też
+			// nie może udawać, że wiadomości wyjdą z RESEND_FROM.
+			templateError = template.error;
+			if (!campaign.from_email && !category.from_email) {
+				sender = { address: null, source: 'nie udało się odczytać szablonu Resend' };
 			}
 		}
 	}
@@ -97,7 +105,8 @@ export const load: PageServerLoad = async ({ params, url }) => {
 		preview,
 		health,
 		sender,
-		deadUnsubscribeLink
+		deadUnsubscribeLink,
+		templateError
 	};
 };
 
@@ -123,6 +132,11 @@ export const actions: Actions = {
 			return { success: 'Kampania zaplanowana — wysyłkę uruchomi cron o wskazanym czasie' };
 		}
 
+		// Wznowienie anulowanej: status zmieniamy PRZED przywróceniem wiadomości do
+		// kolejki — inaczej przebieg crona w tym oknie zdjąłby je znowu jako anulowane.
+		if (campaign.status === 'canceled') {
+			await db.from('email_campaigns').update({ status: 'sending' }).eq('id', params.id);
+		}
 		const { queued, skipped } = await materializeCampaign(db, params.id);
 		await db.from('email_campaigns').update({ status: 'sending' }).eq('id', params.id);
 		// Kampania bez nikogo w kolejce od razu dostaje status końcowy.
@@ -136,7 +150,7 @@ export const actions: Actions = {
 	process: async ({ url }) => {
 		const result = await processQueue(adminClient(), url.origin, 20);
 		return {
-			success: `Partia przetworzona: wysłane ${result.sent}, błędy ${result.failed}, ponowienia ${result.requeued}, wstrzymane (duplikat / blokada) ${result.withheld}${result.rateLimited ? ' (Resend: limit zapytań — reszta w kolejnej partii)' : ''}`
+			success: `Partia przetworzona: wysłane ${result.sent}, błędy ${result.failed}, ponowienia ${result.requeued}, wstrzymane (duplikat / blokada) ${result.withheld}${result.held ? `, czekają na poprawkę szablonu ${result.held}` : ''}${result.rateLimited ? ' (Resend: limit zapytań — reszta w kolejnej partii)' : ''}`
 		};
 	},
 

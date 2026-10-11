@@ -90,10 +90,17 @@
 
 {#if data.deadUnsubscribeLink}
 	<div class="alert alert-error">
-		<strong>Szablon Resend ma martwy link wypisu.</strong> Używa zmiennej
+		<strong>Wysyłka wstrzymana: szablon Resend ma martwy link wypisu.</strong> Używa zmiennej
 		<span class="mono">{'{{{RESEND_UNSUBSCRIBE_URL}}}'}</span>, którą Resend wypełnia tylko w Broadcasts —
 		w mailu z HUB link wychodzi pusty. Zamień ją w szablonie na
-		<span class="mono">{'{{{link_wypisu}}}'}</span> (z wartością domyślną) i opublikuj szablon przed wysyłką.
+		<span class="mono">{'{{{link_wypisu}}}'}</span> (z wartością domyślną) i opublikuj szablon.
+		Do tego czasu wiadomości tej kampanii czekają w kolejce — nic nie przepada.
+	</div>
+{/if}
+{#if data.templateError}
+	<div class="alert alert-error">
+		<strong>Nie udało się odczytać szablonu Resend</strong> ({data.templateError}). Wysyłka czeka, aż
+		odczyt się uda — HUB nie wyśle z zastępczego adresu RESEND_FROM.
 	</div>
 {/if}
 

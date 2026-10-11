@@ -129,8 +129,9 @@ export async function getResendTemplate(
 			const html = data.html ?? '';
 			const info: ResendTemplateInfo = {
 				from: typeof data.from === 'string' && data.from.trim() ? data.from.trim() : null,
-				deadUnsubscribeLink:
-					/RESEND_UNSUBSCRIBE_URL|\{\{\{?\s*UNSUBSCRIBE_URL/.test(html) && !html.includes('link_wypisu')
+				// Każde wystąpienie się liczy — obok działającego {{{link_wypisu}}} może stać
+				// drugi, pusty link („Zarządzaj subskrypcją”).
+				deadUnsubscribeLink: /RESEND_UNSUBSCRIBE_URL|\{\{\{?\s*UNSUBSCRIBE_URL/.test(html)
 			};
 			templateCache.set(templateId, { info, expires: Date.now() + TEMPLATE_CACHE_MS });
 			return { ok: true, info };
