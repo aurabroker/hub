@@ -101,7 +101,7 @@
 		</ul>
 	{/if}
 
-	<div class="kpi-grid">
+	<div class="kpi-grid kpi-grid-ads">
 		{#each data.kpis as k (k.key)}
 			<div class="kpi-card">
 				<div class="kpi-label">{k.label}</div>
@@ -345,6 +345,18 @@
 {/if}
 
 <style>
+	/* Osiem metryk: auto-fit z app.css dawał 7 + 1 sierotę w drugim rzędzie.
+	   Stałe 4 × 2 (na wąskim ekranie 2 × 4) trzyma pary „ruch / pieniądze"
+	   i „udział / utrata udziału" w jednym rzędzie. */
+	.kpi-grid-ads {
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+	}
+	@media (max-width: 900px) {
+		.kpi-grid-ads {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+
 	.head {
 		display: flex;
 		align-items: baseline;

@@ -140,11 +140,13 @@ describe('limit rozmiaru', () => {
 		const chunk = new TextEncoder().encode('x'.repeat(64 * 1024));
 		let sent = 0;
 		let cancelled = false;
-		// Strumień bez końca: nigdy nie wywołuje close(). Kod, który najpierw
-		// czyta wszystko, a limit sprawdza dopiero na końcu, zawiśnie tu
-		// i test padnie na przekroczeniu czasu zamiast przejść.
+		// Strumień 4 MB (64 × 64 kB) — dużo dłuższy niż limit. Kod, który
+		// najpierw czyta wszystko, a limit sprawdza dopiero na końcu, też odda
+		// 413, ale wyczerpie cały strumień i asercja na `sent` go złapie.
+		// (Strumień bez końca zawiesiłby taki kod razem z timerem testu.)
 		const stream = new ReadableStream<Uint8Array>({
 			pull(controller) {
+				if (sent >= 64) return controller.close();
 				sent++;
 				controller.enqueue(chunk);
 			},

@@ -65,6 +65,7 @@ linki UTM).
 | `/utm/slowniki` | Serwisy Aura i kanoniczne wartości `utm_*` |
 | `/utm/raport` | Skuteczność kampanii: kliknięcia (własne + Bitly), wejścia z analityki i leady |
 | `/analityka` | Ruch na ośmiu serwisach Aura: odsłony, kanały, kampanie, Core Web Vitals (opis w `CLAUDE.md`) |
+| `/google-ads` | **Google Ads** — tygodniowy raport kampanii UD_2026: alerty, KPI tydzień do tygodnia, trend do 26 tygodni, ustawienia, konwersje, słowa kluczowe, hasła, zmiany na koncie; archiwum tygodni i pobranie `.md` (opis niżej) |
 
 ## Uruchomienie
 
@@ -377,6 +378,30 @@ PNG składany jest w przeglądarce z pobranego SVG.
 `utm_clicks.ip_hash` to SHA-256 z adresu IP **posolony** wartością `UTM_INGEST_SECRET`.
 Surowy adres IP nie jest nigdzie zapisywany, a przy braku sekretu nie zapisujemy nawet
 skrótu — niesolony hash adresu IPv4 jest odwracalny w kilka sekund.
+
+## Raport Google Ads
+
+Skrypt Google Ads Scripts co poniedziałek ok. 6:00 wysyła raport kampanii UD_2026
+(utratadochodu.pl) za poprzedni pełny tydzień na `POST /api/webhooks/ads-report`.
+HUB nie czyta Google Sheets — kopia w arkuszu jest tylko zapasowa.
+
+- **Autoryzacja:** `Authorization: Bearer <ADS_REPORT_TOKEN>`, porównanie odporne na pomiar
+  czasu. Brak sekretu w środowisku → 503, zły albo brak tokenu → 401, treść > 1 MB → 413,
+  zły JSON albo brak `period.end` / `kpi.current` / `kpi.previous` / `alerts` → 400 z listą
+  błędów, sukces → `{"ok": true, "period_end": "…"}`.
+- **Skrypt musi wysyłać `Content-Type: application/json`** (w UrlFetchApp
+  `contentType: 'application/json'`). Domyślny typ formularza kończy się odpowiedzią 403
+  z ochrony CSRF SvelteKita, zanim token zostanie sprawdzony.
+- **Zapis:** tabela `ads_reports` (migracja `20261026120000_ads_reports.sql`), jeden wiersz
+  na tydzień, klucz `period_end`. Ponowne wysłanie tygodnia nadpisuje wiersz. „Najnowszy”
+  = największe `period_end`, więc ponowne wysłanie starego tygodnia go nie przestawia.
+  RLS: odczyt tylko dla adminów, zapis wyłącznie przez webhook (service role).
+- **Zakładka** `/google-ads` jest za bramką administratora; Markdown raportu idzie wyłącznie
+  jako plik do pobrania (`/google-ads/pobierz/{period_end}`), nigdy jako HTML — wyszukiwane
+  hasła to tekst wpisany przez dowolnego użytkownika Google. Ostrzeżenie „Skrypt nie przysłał
+  raportu” pojawia się, gdy najnowszy raport odebrano ponad 8 dni temu.
+- **Testy:** `npm test` (Vitest) — endpoint na magazynie w pamięci i render zakładki
+  z `src/lib/ads/fixture.json`, przykładowego raportu zgodnego z kontraktem.
 
 ## Zasady wyglądu panelu
 

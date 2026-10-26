@@ -104,9 +104,12 @@ async function readCapped(request: Request, max: number): Promise<Uint8Array | n
 		const { done, value } = await reader.read();
 		if (done) break;
 		total += value.byteLength;
+		if (total > max) {
+			await reader.cancel().catch(() => {});
+			return null;
+		}
 		chunks.push(value);
 	}
-	if (total > max) return null;
 	const out = new Uint8Array(total);
 	let offset = 0;
 	for (const chunk of chunks) {
