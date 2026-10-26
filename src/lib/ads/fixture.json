@@ -113,6 +113,45 @@
 			"cost": 158.16,
 			"conversions": 2,
 			"cpa": 79.08
+		},
+		{
+			"ad_group": "UD | Wyłączone",
+			"ad_group_status": "PAUSED",
+			"keyword": "l4 dla przedsiębiorcy",
+			"match_type": "PHRASE",
+			"status": "ENABLED",
+			"quality_score": null,
+			"impressions": 0,
+			"clicks": 0,
+			"cost": 0,
+			"conversions": 0,
+			"cpa": null
+		},
+		{
+			"ad_group": "UD | Archiwum",
+			"ad_group_status": "PAUSED",
+			"keyword": "ubezpieczenie chorobowe",
+			"match_type": "BROAD",
+			"status": "PAUSED",
+			"quality_score": null,
+			"impressions": 0,
+			"clicks": 0,
+			"cost": 0,
+			"conversions": 0,
+			"cpa": null
+		},
+		{
+			"ad_group": "UD | Archiwum",
+			"ad_group_status": "PAUSED",
+			"keyword": "chorobowe jdg",
+			"match_type": "EXACT",
+			"status": "ENABLED",
+			"quality_score": 4,
+			"impressions": 0,
+			"clicks": 0,
+			"cost": 0,
+			"conversions": 0,
+			"cpa": null
 		}
 	],
 	"search_terms": [

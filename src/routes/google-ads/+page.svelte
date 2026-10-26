@@ -2,6 +2,7 @@
 	import BarChart from '$lib/components/BarChart.svelte';
 	import Sparkline from '$lib/components/Sparkline.svelte';
 	import { formatInt } from '$lib/ads/format';
+	import type { KeywordRow, SearchTermRow } from '$lib/ads/view';
 	import type { PageServerData } from './$types';
 
 	/**
@@ -206,98 +207,43 @@
 	</div>
 
 	<div class="table-wrap">
-		<div class="table-toolbar"><h3>Słowa kluczowe</h3></div>
-		{#if data.keywords.length === 0}
+		<div class="table-toolbar">
+			<h3>Słowa kluczowe</h3>
+			{#if data.keywords.total > 0}
+				<span class="faint toolbar-count">
+					{data.keywords.active.length} z {data.keywords.total} z wyświetleniami
+				</span>
+			{/if}
+		</div>
+		{#if data.keywords.total === 0}
 			<p class="muted small pad">Brak danych w tym raporcie.</p>
 		{:else}
-			<div class="table-scroll">
-				<table class="tbl">
-					<colgroup>
-						<col style="width: 26%" />
-						<col style="width: 10%" />
-						<col style="width: 9%" />
-						<col style="width: 7%" />
-						<col style="width: 8%" />
-						<col style="width: 8%" />
-						<col style="width: 11%" />
-						<col style="width: 8%" />
-						<col style="width: 13%" />
-					</colgroup>
-					<thead>
-						<tr>
-							<th>Słowo kluczowe</th>
-							<th>Dopasowanie</th>
-							<th>Status</th>
-							<th class="num" title="Wynik jakości">WJ</th>
-							<th class="num">Wyświetl.</th>
-							<th class="num">Kliknięcia</th>
-							<th class="num">Koszt</th>
-							<th class="num">Konw.</th>
-							<th class="num">Koszt konw.</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each data.keywords as k, i (i)}
-							<tr>
-								<td>
-									<span class="cell-main">{k.keyword}</span>
-									<span class="cell-sub">{k.adGroup}</span>
-								</td>
-								<td>{k.matchType}</td>
-								<td><span class="badge badge-{k.statusBadge}">{k.status}</span></td>
-								<td class="num">{k.qualityScore}</td>
-								<td class="num">{k.impressions}</td>
-								<td class="num">{k.clicks}</td>
-								<td class="num">{k.cost}</td>
-								<td class="num">{k.conversions}</td>
-								<td class="num">{k.cpa}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
+			{#if data.keywords.active.length === 0}
+				<p class="muted small pad">Żadne słowo kluczowe nie miało wyświetleń w tym tygodniu.</p>
+			{:else}
+				{@render keywordTable(data.keywords.active)}
+			{/if}
+			{#if data.keywords.inactive.length > 0}
+				<details class="more">
+					<summary>Bez wyświetleń w tym tygodniu ({data.keywords.inactive.length})</summary>
+					{@render keywordTable(data.keywords.inactive)}
+				</details>
+			{/if}
 		{/if}
 	</div>
 
 	<div class="table-wrap">
 		<div class="table-toolbar"><h3>Wyszukiwane hasła</h3></div>
-		{#if data.searchTerms.length === 0}
+		{#if data.searchTerms.total === 0}
 			<p class="muted small pad">Brak danych w tym raporcie.</p>
 		{:else}
-			<div class="table-scroll">
-				<table class="tbl">
-					<colgroup>
-						<col style="width: 46%" />
-						<col style="width: 12%" />
-						<col style="width: 12%" />
-						<col style="width: 16%" />
-						<col style="width: 14%" />
-					</colgroup>
-					<thead>
-						<tr>
-							<th>Wyszukiwane hasło</th>
-							<th class="num">Wyświetl.</th>
-							<th class="num">Kliknięcia</th>
-							<th class="num">Koszt</th>
-							<th class="num">Konw.</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each data.searchTerms as t, i (i)}
-							<tr>
-								<td>
-									<span class="cell-main">{t.term}</span>
-									<span class="cell-sub">{t.adGroup}</span>
-								</td>
-								<td class="num">{t.impressions}</td>
-								<td class="num">{t.clicks}</td>
-								<td class="num">{t.cost}</td>
-								<td class="num">{t.conversions}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
+			{@render searchTermTable(data.searchTerms.top)}
+			{#if data.searchTerms.rest.length > 0}
+				<details class="more">
+					<summary>Pozostałe hasła ({data.searchTerms.rest.length})</summary>
+					{@render searchTermTable(data.searchTerms.rest)}
+				</details>
+			{/if}
 		{/if}
 	</div>
 
@@ -343,6 +289,92 @@
 		{/if}
 	</div>
 {/if}
+
+{#snippet keywordTable(list: KeywordRow[])}
+	<div class="table-scroll">
+		<table class="tbl">
+			<colgroup>
+				<col style="width: 26%" />
+				<col style="width: 10%" />
+				<col style="width: 9%" />
+				<col style="width: 7%" />
+				<col style="width: 8%" />
+				<col style="width: 8%" />
+				<col style="width: 11%" />
+				<col style="width: 8%" />
+				<col style="width: 13%" />
+			</colgroup>
+			<thead>
+				<tr>
+					<th>Słowo kluczowe</th>
+					<th>Dopasowanie</th>
+					<th>Status</th>
+					<th class="num" title="Wynik jakości">WJ</th>
+					<th class="num">Wyświetl.</th>
+					<th class="num">Kliknięcia</th>
+					<th class="num">Koszt</th>
+					<th class="num">Konw.</th>
+					<th class="num">Koszt konw.</th>
+				</tr>
+			</thead>
+			<tbody>
+				{#each list as k, i (i)}
+					<tr>
+						<td>
+							<span class="cell-main">{k.keyword}</span>
+							<span class="cell-sub">{k.adGroup}</span>
+						</td>
+						<td>{k.matchType}</td>
+						<td><span class="badge badge-{k.statusBadge}">{k.status}</span></td>
+						<td class="num">{k.qualityScore}</td>
+						<td class="num">{k.impressions}</td>
+						<td class="num">{k.clicks}</td>
+						<td class="num">{k.cost}</td>
+						<td class="num">{k.conversions}</td>
+						<td class="num">{k.cpa}</td>
+					</tr>
+				{/each}
+			</tbody>
+		</table>
+	</div>
+{/snippet}
+
+{#snippet searchTermTable(list: SearchTermRow[])}
+	<div class="table-scroll">
+		<table class="tbl">
+			<colgroup>
+				<col style="width: 46%" />
+				<col style="width: 12%" />
+				<col style="width: 12%" />
+				<col style="width: 16%" />
+				<col style="width: 14%" />
+			</colgroup>
+			<thead>
+				<tr>
+					<th>Wyszukiwane hasło</th>
+					<th class="num">Wyświetl.</th>
+					<th class="num">Kliknięcia</th>
+					<th class="num">Koszt</th>
+					<th class="num">Konw.</th>
+				</tr>
+			</thead>
+			<tbody>
+				{#each list as t, i (i)}
+					<tr>
+						<td>
+							<span class="cell-main">{t.term}</span>
+							<span class="cell-sub">{t.adGroup}</span>
+						</td>
+						<td class="num">{t.impressions}</td>
+						<td class="num">{t.clicks}</td>
+						<td class="num">{t.cost}</td>
+						<td class="num">{t.conversions}</td>
+					</tr>
+				{/each}
+			</tbody>
+		</table>
+	</div>
+{/snippet}
 
 <style>
 	/* Osiem metryk: auto-fit z app.css dawał 7 + 1 sierotę w drugim rzędzie.
@@ -546,5 +578,22 @@
 	}
 	.tbl tbody tr.row-reco td:first-child {
 		box-shadow: inset 3px 0 0 var(--color-warning);
+	}
+	/* Zwinięta reszta tabeli: natywny <details>, działa bez JS. */
+	.more {
+		border-top: 1px solid var(--color-border);
+	}
+	.more > summary {
+		cursor: pointer;
+		padding: var(--space-3) var(--space-5);
+		font-size: var(--text-sm);
+		color: var(--color-text-muted);
+	}
+	.more[open] > summary {
+		border-bottom: 1px solid var(--color-border);
+	}
+	.toolbar-count {
+		font-size: var(--text-xs);
+		font-variant-numeric: tabular-nums;
 	}
 </style>

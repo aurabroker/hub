@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import fixture from '$lib/ads/fixture.json';
 import { DASH, NBSP } from '$lib/ads/format';
 import type { AdsArchiveEntry, AdsTrendPoint, StoredAdsReport } from '$lib/ads/types';
-import { buildAdsView, pickWeek } from '$lib/ads/view';
+import { SEARCH_TERMS_VISIBLE, buildAdsView, pickWeek } from '$lib/ads/view';
 import Page from './+page.svelte';
 
 /**
@@ -301,5 +301,161 @@ describe('stany brzegowe', () => {
 		const plain = text(renderPage({ requested: '2026-02-30' }));
 		expect(plain).toContain('Nie ma raportu za tydzień 2026-02-30');
 		expect(plain).toContain(`26.10.2026 ${DASH} 01.11.2026`);
+	});
+});
+
+/** Fragment HTML od nagłówka sekcji do następnej sekcji `.table-wrap`. */
+function section(html: string, title: string): string {
+	const start = html.indexOf(`<h3>${title}</h3>`);
+	if (start < 0) throw new Error(`Brak sekcji: ${title}`);
+	const end = html.indexOf('class="table-wrap"', start);
+	return html.slice(start, end < 0 ? undefined : end);
+}
+
+/** Część sekcji przed `<details>` i wewnątrz niego. */
+function splitDetails(html: string): { visible: string; folded: string } {
+	const at = html.indexOf('<details');
+	if (at < 0) return { visible: html, folded: '' };
+	return { visible: html.slice(0, at), folded: html.slice(at, html.indexOf('</details>', at)) };
+}
+
+/** Słowa kluczowe / hasła w kolejności wierszy tabeli. */
+function mainCells(html: string): string[] {
+	return [...html.matchAll(/<span class="cell-main">([^<]*)<\/span>/g)].map((m) => text(m[1]).trim());
+}
+
+function keyword(
+	keyword: string,
+	ad_group: string,
+	m: { impressions?: number | null; clicks?: number | null; cost?: number | null }
+) {
+	return {
+		ad_group,
+		ad_group_status: 'ENABLED',
+		keyword,
+		match_type: 'EXACT' as const,
+		status: 'ENABLED',
+		quality_score: null,
+		impressions: m.impressions as number,
+		clicks: m.clicks as number,
+		cost: m.cost as number,
+		conversions: 0,
+		cpa: null
+	};
+}
+
+describe('słowa kluczowe: aktywne na wierzchu, zerowe zwinięte', () => {
+	const html = renderPage({});
+	const kw = section(html, 'Słowa kluczowe');
+	const { visible, folded } = splitDetails(kw);
+
+	it('licznik w nagłówku: ile z wszystkich miało wyświetlenia', () => {
+		expect(text(kw)).toContain('3 z 6 z wyświetleniami');
+	});
+
+	it('aktywne od najdroższego, niezależnie od kolejności ze skryptu', () => {
+		// Skrypt: prywatne l4 (1064 zł), ubezpieczenie… (12,40 zł), zwolnienie… (158,16 zł).
+		expect(mainCells(visible)).toEqual([
+			'prywatne l4',
+			'zwolnienie lekarskie jdg',
+			'ubezpieczenie od utraty dochodu'
+		]);
+	});
+
+	it('słowa bez wyświetleń tylko w zwiniętym <details>, po grupie i słowie', () => {
+		expect(folded).toMatch(/^<details class="more[ "]/);
+		// Zwinięte domyślnie: bez atrybutu open.
+		expect(folded).not.toMatch(/^<details[^>]*\sopen/);
+		expect(text(folded)).toContain('Bez wyświetleń w tym tygodniu (3)');
+		expect(mainCells(folded)).toEqual([
+			'chorobowe jdg',
+			'ubezpieczenie chorobowe',
+			'l4 dla przedsiębiorcy'
+		]);
+		for (const k of mainCells(folded)) expect(mainCells(visible)).not.toContain(k);
+	});
+
+	it('remis kosztu rozstrzygają kliknięcia, potem wyświetlenia, potem nazwa', () => {
+		const report = structuredClone(fixture) as StoredAdsReport;
+		report.keywords = [
+			keyword('d', 'G', { impressions: 50, clicks: 1, cost: 5 }),
+			keyword('c', 'G', { impressions: 10, clicks: 2, cost: 5 }),
+			keyword('b', 'G', { impressions: 10, clicks: 1, cost: 5 }),
+			keyword('a', 'G', { impressions: 10, clicks: 1, cost: 5 }),
+			keyword('e', 'G', { impressions: 1, clicks: null, cost: null }),
+			keyword('f', 'G', { impressions: null, clicks: null, cost: null })
+		];
+		const { visible, folded } = splitDetails(section(renderPage({ report }), 'Słowa kluczowe'));
+		expect(mainCells(visible)).toEqual(['c', 'd', 'a', 'b', 'e']);
+		// Brak wyświetleń (null) liczy się jak zero.
+		expect(mainCells(folded)).toEqual(['f']);
+	});
+
+	it('żadne słowo bez wyświetleń: komunikat i nadal zwinięta lista', () => {
+		const report = structuredClone(fixture) as StoredAdsReport;
+		report.keywords = [
+			keyword('x', 'B', { impressions: 0, clicks: 0, cost: 0 }),
+			keyword('y', 'A', { impressions: 0, clicks: 0, cost: 0 })
+		];
+		const kw = section(renderPage({ report }), 'Słowa kluczowe');
+		const { visible, folded } = splitDetails(kw);
+		expect(text(kw)).toContain('0 z 2 z wyświetleniami');
+		expect(text(visible)).toContain('Żadne słowo kluczowe nie miało wyświetleń w tym tygodniu.');
+		// Bez pustej tabeli nad komunikatem.
+		expect(visible).not.toContain('<table');
+		expect(text(folded)).toContain('Bez wyświetleń w tym tygodniu (2)');
+		expect(mainCells(folded)).toEqual(['y', 'x']);
+	});
+
+	it('wszystkie z wyświetleniami: bez zwiniętej listy', () => {
+		const report = structuredClone(fixture) as StoredAdsReport;
+		report.keywords = [keyword('x', 'A', { impressions: 3, clicks: 0, cost: 0 })];
+		const kw = section(renderPage({ report }), 'Słowa kluczowe');
+		expect(kw).not.toContain('<details');
+		expect(text(kw)).toContain('1 z 1 z wyświetleniami');
+	});
+});
+
+describe('wyszukiwane hasła', () => {
+	function term(search_term: string, cost: number, clicks = 0, impressions = 1) {
+		return { search_term, ad_group: 'G', impressions, clicks, cost, conversions: 0 };
+	}
+
+	it('od najdroższego, remisy po kliknięciach, wyświetleniach i haśle', () => {
+		const report = structuredClone(fixture) as StoredAdsReport;
+		report.search_terms = [
+			term('tanie', 1),
+			term('b', 9, 2, 5),
+			term('a', 9, 2, 5),
+			term('więcej wyświetleń', 9, 2, 50),
+			term('więcej kliknięć', 9, 3, 1),
+			term('najdroższe', 20)
+		];
+		const st = section(renderPage({ report }), 'Wyszukiwane hasła');
+		expect(st).not.toContain('<details');
+		expect(mainCells(st)).toEqual([
+			'najdroższe',
+			'więcej kliknięć',
+			'więcej wyświetleń',
+			'a',
+			'b',
+			'tanie'
+		]);
+	});
+
+	it(`ponad ${SEARCH_TERMS_VISIBLE} haseł: reszta w zwiniętym „Pozostałe hasła”`, () => {
+		const report = structuredClone(fixture) as StoredAdsReport;
+		// 53 hasła w kolejności rosnącego kosztu — najdroższe muszą wyjść na wierzch.
+		report.search_terms = Array.from({ length: SEARCH_TERMS_VISIBLE + 3 }, (_, i) =>
+			term(`haslo-${String(i).padStart(2, '0')}`, i)
+		);
+		const { visible, folded } = splitDetails(section(renderPage({ report }), 'Wyszukiwane hasła'));
+		const top = mainCells(visible);
+		expect(top).toHaveLength(SEARCH_TERMS_VISIBLE);
+		expect(top[0]).toBe('haslo-52');
+		expect(top.at(-1)).toBe('haslo-03');
+		expect(folded).not.toMatch(/^<details[^>]*\sopen/);
+		expect(text(folded)).toContain('Pozostałe hasła (3)');
+		expect(mainCells(folded)).toEqual(['haslo-02', 'haslo-01', 'haslo-00']);
 	});
 });
