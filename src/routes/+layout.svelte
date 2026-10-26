@@ -34,7 +34,10 @@
 		},
 		{
 			label: 'Analityka',
-			items: [{ href: '/analityka', title: 'Ruch na stronach', icon: '◔' }]
+			items: [
+				{ href: '/analityka', title: 'Ruch na stronach', icon: '◔' },
+				{ href: '/google-ads', title: 'Google Ads', icon: '◎' }
+			]
 		},
 		{
 			label: 'Konfiguracja',

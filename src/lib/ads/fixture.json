@@ -1,0 +1,184 @@
+{
+	"campaign": "UD_2026",
+	"script_version": "2026-10-26-tyg",
+	"generated_at": "2026-11-02T05:03:11.000Z",
+	"generated_local": "02.11.2026 06:03",
+	"period": {
+		"start": "2026-10-26",
+		"end": "2026-11-01",
+		"prev_start": "2026-10-19",
+		"prev_end": "2026-10-25"
+	},
+	"settings": {
+		"status": "ENABLED",
+		"primary_status": "LIMITED",
+		"primary_status_reasons": "SEARCH_VOLUME_LIMITED",
+		"bidding_strategy": "MAXIMIZE_CONVERSIONS",
+		"target_cpa": null,
+		"google_search": true,
+		"search_partners": false,
+		"content_network": false,
+		"daily_budget": 55
+	},
+	"kpi": {
+		"current": {
+			"impressions": 5120,
+			"clicks": 412,
+			"cost": 1234.56,
+			"conversions": 9,
+			"other_networks_cost": 0,
+			"ctr": 0.0805,
+			"cpc": 3.0,
+			"cpa": 137.17,
+			"search_is": 0.58,
+			"lost_is_rank": 0.39,
+			"lost_is_budget": 0.03
+		},
+		"previous": {
+			"impressions": 4410,
+			"clicks": 367,
+			"cost": 1098.2,
+			"conversions": 8,
+			"other_networks_cost": 0,
+			"ctr": 0.0832,
+			"cpc": 2.99,
+			"cpa": null,
+			"search_is": 0.5,
+			"lost_is_rank": 0.42,
+			"lost_is_budget": 0.08
+		}
+	},
+	"daily": [
+		{
+			"date": "2026-10-26",
+			"period": "current",
+			"impressions": 704,
+			"clicks": 59,
+			"cost": 176.3,
+			"conversions": 1,
+			"other_networks_clicks": 0,
+			"other_networks_cost": 0
+		},
+		{
+			"date": "2026-10-19",
+			"period": "previous",
+			"impressions": 612,
+			"clicks": 51,
+			"cost": 152.1,
+			"conversions": 1,
+			"other_networks_clicks": 0,
+			"other_networks_cost": 0
+		}
+	],
+	"conversions": [
+		{ "date": "2026-10-28", "conversion_action": "Przesłanie formularza kontaktowego", "conversions": 1 },
+		{ "date": "2026-10-30", "conversion_action": "Kliknięcie numeru telefonu", "conversions": 2 }
+	],
+	"keywords": [
+		{
+			"ad_group": "UD | Rdzeń",
+			"ad_group_status": "ENABLED",
+			"keyword": "prywatne l4",
+			"match_type": "EXACT",
+			"status": "ENABLED",
+			"quality_score": 5,
+			"impressions": 2700,
+			"clicks": 250,
+			"cost": 1064.0,
+			"conversions": 7,
+			"cpa": 152.0
+		},
+		{
+			"ad_group": "UD | Rdzeń",
+			"ad_group_status": "ENABLED",
+			"keyword": "ubezpieczenie od utraty dochodu",
+			"match_type": "PHRASE",
+			"status": "PAUSED",
+			"quality_score": null,
+			"impressions": 140,
+			"clicks": 4,
+			"cost": 12.4,
+			"conversions": 0,
+			"cpa": null
+		},
+		{
+			"ad_group": "UD | Szerokie",
+			"ad_group_status": "ENABLED",
+			"keyword": "zwolnienie lekarskie jdg",
+			"match_type": "BROAD",
+			"status": "ENABLED",
+			"quality_score": 3,
+			"impressions": 2280,
+			"clicks": 158,
+			"cost": 158.16,
+			"conversions": 2,
+			"cpa": 79.08
+		}
+	],
+	"search_terms": [
+		{
+			"search_term": "prywatne l4 jdg",
+			"ad_group": "UD | Rdzeń",
+			"impressions": 80,
+			"clicks": 6,
+			"cost": 15.2,
+			"conversions": 1
+		},
+		{
+			"search_term": "<script>alert(1)</script> l4",
+			"ad_group": "UD | Szerokie",
+			"impressions": 3,
+			"clicks": 1,
+			"cost": 2.5,
+			"conversions": 0
+		}
+	],
+	"changes": [
+		{
+			"date_time": "2026-10-27 10:12:33",
+			"source": "panel Google Ads",
+			"source_code": "GOOGLE_ADS_WEB_CLIENT",
+			"flag": "",
+			"resource": "słowo kluczowe / kryterium",
+			"resource_code": "AD_GROUP_CRITERION",
+			"operation": "zmiana",
+			"operation_code": "UPDATE",
+			"object": "słowo: ubezpieczenie od utraty dochodu (do wyrażenia)",
+			"details": "status: ENABLED → PAUSED"
+		},
+		{
+			"date_time": "2026-10-28 03:41:02",
+			"source": "rekomendacje Google",
+			"source_code": "GOOGLE_ADS_RECOMMENDATIONS",
+			"flag": "REKOMENDACJA",
+			"resource": "kampania",
+			"resource_code": "CAMPAIGN",
+			"operation": "zmiana",
+			"operation_code": "UPDATE",
+			"object": "kampania: UD_2026",
+			"details": "budżet dzienny: 45 → 55"
+		},
+		{
+			"date_time": "2026-10-30 22:05:47",
+			"source": "automatycznie stosowane rekomendacje",
+			"source_code": "GOOGLE_ADS_AUTOMATED_RECOMMENDATIONS",
+			"flag": "AUTO-REKOMENDACJA",
+			"resource": "słowo kluczowe / kryterium",
+			"resource_code": "AD_GROUP_CRITERION",
+			"operation": "dodanie",
+			"operation_code": "CREATE",
+			"object": "słowo: zwolnienie lekarskie jdg (przybliżone)",
+			"details": "nowe słowo kluczowe w grupie UD | Szerokie"
+		}
+	],
+	"alerts": [
+		{ "level": "INFO", "code": "NEW_SEARCH_TERMS", "message": "Pojawiło się 12 nowych wyszukiwanych haseł." },
+		{ "level": "UWAGA", "code": "CPA_UP", "message": "Koszt konwersji wzrósł względem poprzedniego okresu." },
+		{
+			"level": "KRYTYCZNE",
+			"code": "AUTO_APPLIED",
+			"message": "Google samodzielnie zastosował rekomendację: nowe słowo kluczowe w dopasowaniu przybliżonym."
+		}
+	],
+	"markdown": "# Raport tygodniowy Google Ads — UD_2026\n\nOkres: 26.10.2026 – 01.11.2026\n"
+}
