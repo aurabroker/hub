@@ -4,14 +4,21 @@ Wewnętrzny panel do zarządzania i wysyłki spersonalizowanych maili do kontakt
 (`crm_companies`), z załącznikami per odbiorca, analityką zapisów/zainteresowań, szybką
 ścieżką 1-do-1 i biblioteką załączników wielokrotnego użytku.
 
-**Stack:** SvelteKit (Svelte 5, runes) · Cloudflare (Pages + Worker cron) · Supabase
+**Stack:** SvelteKit (Svelte 5, runes; Edytor e-mail jako wyspa React 18) · Cloudflare
+(Pages + Worker cron + Worker analityki z Analytics Engine i KV) · Supabase
 (Postgres, Storage, Auth) · Resend (API + Templates + webhooki).
 
 - **Produkcja (on-line):** https://hub.auraexpert.pl (Cloudflare Pages).
-- **Wersja produkcyjna / działająca:** commit `b1bcabd`. To jest wersja przywrócona jako
-  produkcyjna — czyta bazę klientów z tabeli `crm_companies` (spójnie z resztą HUB).
+- **Gałąź produkcyjna:** `main`. Cloudflare Pages buduje i wdraża ostatni commit po każdym
+  pushu na `main` — push na `main` jest wdrożeniem. Wdrożony commit widać pod logo
+  w menu bocznym (`v{wersja} · {skrót commita}`, skrót z `CF_PAGES_COMMIT_SHA`).
+  W lipcu 2026 produkcję przywrócono do commita `b1bcabd` (baza klientów czytana
+  z `crm_companies`, spójnie z resztą HUB); dalsze zmiany powstały na tej podstawie.
 - **Baza klientów:** dane CRM (`crm_companies`) znajdują się w projekcie **BEAUTY** w Supabase.
-  HUB tylko z niej czyta — nie modyfikuje struktury tej bazy.
+  HUB nie modyfikuje struktury tabel CRM. Dane zapisuje w nich tylko w dwóch miejscach:
+  po wysyłce do kontaktu z CRM dopisuje wpis `crm_history` (`type='email'`), a akcja
+  „oznacz” w `/duplicates` dopisuje tag `duplikat` w `crm_companies.tag` i notatkę
+  w `crm_history` (`type='notatka'`).
 
 > ## ⛔ Autoryzacja i weryfikacja Supabase — NIE ZMIENIAĆ
 >
@@ -35,7 +42,8 @@ Wewnętrzny panel do zarządzania i wysyłki spersonalizowanych maili do kontakt
 Panel dostępny wyłącznie dla administratorów platformy
 (`public.is_platform_admin()` → `profiles.account_type in ('super_admin','support_admin')`).
 Niezalogowani/nieuprawnieni są przekierowywani na `/login`. Publiczne trasy (bez logowania):
-`/login`, `/api/webhooks/`, `/api/cron/`, `/files/`.
+`/login`, `/api/webhooks/`, `/api/cron/`, `/files/` (pliki w trybie „linki”), `/l/` (krótkie
+linki UTM).
 
 ## Ekrany
 
@@ -44,11 +52,14 @@ Niezalogowani/nieuprawnieni są przekierowywani na `/login`. Publiczne trasy (be
 | `/` | Dashboard: kafle (kontakty, duplikaty, wysłane, open/click rate) + wykresy (zapisy/dzień, rozkład sekcji, wysyłka/dzień) |
 | `/signups` | **Zapisy dzienne** — codzienne zapisy klientów do bazy CRM (`crm_companies`), grupowane po dniach; zapisy z dziś wyróżnione |
 | `/clients` | **Baza Klientów** — wszystkie kontakty z `crm_companies`; klik w wiersz otwiera pełną kartę klienta |
+| `/clients/kategorie` | **Wysyłka wg kategorii** — per kategoria zapytania: liczba firm, kwalifikujących się (RODO + e-mail) i czekających w kolejce; lista firm (`/clients/kategorie/{kod}`); „Wyślij do wszystkich” kolejkuje wysyłkę z dziennym limitem, kampanie mają pierwszeństwo |
 | `/send` | **WYŚLIJ EMAIL** — szybka wysyłka 1-do-1: adres + checkboxy kategorii + SEND; każda kategoria = osobny mail z załącznikami z biblioteki |
+| `/email-editor` | **EDYTOR E-MAIL** — treść HTML sekcji (wyspa React, tylko w przeglądarce): drafty (`email_drafts`), upload do biblioteki, wysyłka testowa; „Zastosuj do sekcji” zapisuje `email_categories.html_body`, który ma pierwszeństwo przed szablonem Resend |
 | `/campaigns` | Kampanie masowe: kreator (segment → kategoria → podgląd), dashboard wysyłki (postęp, statusy per odbiorca, ponowienie nieudanych) |
+| `/sms-export` | **EKSPORT SMS (CSV)** — plik kontaktów do importu w SMSAPI (średnik, numery `48XXXXXXXXX`): filtry kategorii, bez sprzeciwu RODO, tylko komórki, deduplikacja; podgląd przed pobraniem |
 | `/library` | Biblioteka załączników: upload do prywatnego bucketa, przypinanie do kategorii, pobieranie (signed URL), usuwanie |
-| `/categories` | Konfiguracja sekcji: szablon Resend, temat, nadawca, aktywność |
-| `/messages` | Log wiadomości z filtrami (status / źródło / kategoria) |
+| `/categories` | Konfiguracja sekcji: szablon Resend, temat, nadawca, tryb plików (załączniki albo linki do pobrania), aktywność, dodawanie sekcji oraz **automat** — wysyłka do nowych zapisów sekcji od daty startu `auto_send_since` (puste = od włączenia; starsza baza jest pomijana) |
+| `/messages` | **Historia wysyłek** — log wiadomości z filtrami (adres / status / źródło / sekcja); „Przetwórz kolejkę”, gdy coś w niej czeka; „Uzupełnij statystyki z Resend” dla maili sprzed subskrypcji webhooka (partie po 25, daty przybliżone) |
 | `/duplicates` | Grupy duplikatów wg e-mail / NIP z akcją „oznacz” (nic nie jest usuwane automatycznie) |
 | `/utm` | **Generator linków UTM** — budowanie otagowanych linków ze słowników, biblioteka linków, krótkie linki `/l/{slug}` z licznikiem kliknięć, kody QR, skracanie w Bitly |
 | `/utm/slowniki` | Serwisy Aura i kanoniczne wartości `utm_*` |
@@ -65,8 +76,13 @@ npm run dev
 
 Zmienne środowiskowe — patrz `.env.example` (nazwy zgodne ze specyfikacją; bez kluczy w kodzie).
 `SUPABASE_SERVICE_ROLE_KEY` i `RESEND_API_KEY` są używane wyłącznie po stronie serwera.
+Poza `.env.example` kod czyta opcjonalne zmienne z wartościami domyślnymi: `QUEUE_BATCH_SIZE`
+(partia kolejki, 20; na planie Workers Free ustaw 4, inaczej partia przekroczy limit
+subrequestów), `SEND_DELAY_MS` (650 ms), `DAILY_SEND_LIMIT` (dobowy limit wysyłki z kolejki,
+100000), `AUTO_SEND_DAILY_LIMIT` (dobowy limit automatu, 100), `AUTO_SEND_MAX_AGE_DAYS` (14).
+Zmienne Turnstile z `.env.example` są obecnie nieużywane.
 
-## Migracja Supabase
+## Migracje Supabase
 
 `supabase/migrations/20260708120000_aura_hub_email_module.sql` tworzy:
 
@@ -75,15 +91,37 @@ Zmienne środowiskowe — patrz `.env.example` (nazwy zgodne ze specyfikacją; b
 - funkcję `email_normalize_interest(text)` — normalizacja wolnego tekstu `ubezpieczenie`
   do kodów kanonicznych (`oc`, `konsultacja`, `tax`, `utrata_dochodu`, `zdrowie`,
   `grupowe`, `brak`, `inne`) z obsługą wariantów myślnika,
-- funkcję `email_has_rodo_consent(text)` — interpretacja zgody RODO,
+- funkcję `email_has_rodo_consent(text)` — **nieużywaną w kodzie HUB** i niezgodną
+  z obowiązującą regułą: zgodę zwraca tylko dla `tak`/`true`/`1`/`yes`/`on`/`zgoda`, więc
+  puste pole liczy jako brak zgody. Wysyłka i eksport stosują `hasRodoConsent` (patrz
+  „RODO”); zapytanie SQL oparte na tej funkcji da inną bazę odbiorców niż HUB,
 - widoki analityczne: `email_stats_signups_daily`, `email_duplicates_by_email`,
   `email_duplicates_by_nip`, `email_stats_interest`, `email_stats_sent_daily`,
 - prywatny bucket Storage `email-assets` (ścieżki `library/{asset_id}/{filename}`),
 - seed kategorii kanonicznych.
 
-Tabele CRM (`crm_companies`, `crm_history`, …) nie są modyfikowane; po wysyłce dopisywany
-jest wpis `crm_history` (`type='email'`). Migracja dotyczy wyłącznie modułu e-mail HUB —
-**nie obejmuje i nie zmienia autoryzacji Supabase** (patrz sekcja powyżej).
+Kolejne migracje modułu e-mail — wszystkie wymagane, kod z nich korzysta:
+
+- `20260709150000_category_attachment_mode.sql` — `email_categories.attachment_mode`
+  (`attachments` | `links`),
+- `20260811120000_email_categories_html_body.sql` — `email_categories.html_body`
+  (treść z Edytora e-mail),
+- `20260811130000_email_drafts.sql` — tabele `email_drafts`, `email_draft_assets` (RLS, tylko admini),
+- `20260811140000_auto_send.sql` — `email_categories.auto_send`, `auto_send_since`; źródło
+  `auto` w `email_messages.source`,
+- `20260818200000_email_messages_claimed_at.sql` — `email_messages.claimed_at` (odzyskiwanie
+  wiadomości zawieszonych w `sending`),
+- `20260820150000_email_stats_backfill.sql` — `email_messages.stats_backfilled_at`
+  (statystyki uzupełnione z API Resend).
+
+Migrację modułu UTM opisuje sekcja „Moduł UTM”.
+
+Migracje nie zmieniają struktury tabel CRM (`crm_companies`, `crm_history`, …), ale
+`email_messages.company_id` ma klucz obcy do `crm_companies(id)` bez `on delete` — kontaktu,
+do którego odwołuje się choć jeden wiersz `email_messages` (także `skipped`), nie da się
+usunąć z CRM, dopóki ten wiersz istnieje. Zapisy danych HUB w CRM — patrz „Baza klientów”
+na górze. Migracje dotyczą wyłącznie modułów HUB — **nie obejmują i nie zmieniają
+autoryzacji Supabase** (patrz sekcja powyżej).
 
 ## Pipeline wysyłki masowej
 
@@ -94,13 +132,16 @@ jest wpis `crm_history` (`type='email'`). Migracja dotyczy wyłącznie modułu e
    w CRM na kilku kartach, a unikalny indeks `(campaign_id, company_id)` tego nie łapał.
    Reszta → `skipped` z powodem; snapshot załączników w `email_attachments`.
 3. Worker cron (`workers/queue-cron`) **co minutę** woła `POST /api/cron/process-queue`
-   (nagłówek `x-cron-secret`); endpoint wysyła partię 20 maili **pojedynczo** przez Resend
+   (nagłówek `x-cron-secret`); endpoint wysyła partię maili (domyślnie 20, `QUEUE_BATCH_SIZE`)
+   **pojedynczo** przez Resend
    (załączniki wykluczają batch), z throttlingiem `SEND_DELAY_MS` (domyślnie 650 ms)
    i retry z powrotem do kolejki (maks. 3 próby → `failed`). Kolejność: automat
    (świeże zapisy) → kampanie → wysyłki „do wszystkich”.
 4. Zaplanowane kampanie (`scheduled_at`, czas warszawski) i automat uruchamia ten sam cron.
-5. Partię można też przetworzyć ręcznie: przycisk na stronie kampanii albo
-   „Przetwórz kolejkę” w Historii wysyłek (cała kolejka, także bez kampanii).
+5. Partię można też przetworzyć ręcznie: „Przetwórz partię teraz” na stronie kampanii
+   (tylko w trakcie wysyłki) albo „Przetwórz kolejkę” w Historii wysyłek. Oba robią to samo
+   co jeden przebieg crona: biorą jedną partię (domyślnie 20) z **całej** kolejki w tej samej kolejności,
+   nie tylko z tej kampanii — przycisk kampanii może więc wysłać automat albo inną kampanię.
 
 > ### ⚠️ Bez crona nic nie wychodzi samo
 >
@@ -108,23 +149,30 @@ jest wpis `crm_history` (`type='email'`). Migracja dotyczy wyłącznie modułu e
 > **wyłącznie** przez Worker `aura-hub-queue-cron`. Do 2026-10-11 tego Workera nie było na
 > koncie Cloudflare — wysyłka szła tylko wtedy, gdy ktoś klikał „Przetwórz partię”.
 > Panel pokazuje teraz „Kolejka stoi”, gdy kolejka nie jest pusta, a od 10 minut nic
-> z niej nie wyszło. Wdrożenie: sekcja „Deploy” niżej.
+> z niej nie wyszło, albo gdy zaplanowanej kampanii minął termin ponad 10 minut temu,
+> a nie wystartowała. Wdrożenie: sekcja „Deploy” niżej.
 
 > ### Duplikaty i awarie
 >
 > **Kontrola tuż przed wysyłką** (`recipientHoldReason`): przy każdej wiadomości z kolejki
 > HUB sprawdza, czy adres nie odbił wcześniej maila ani nie zgłosił spamu i czy nie dostał
-> już tej kampanii (dla automatu i „do wszystkich”: tej sekcji). Z kilku czekających kopii
+> już tej kampanii (dla automatu: tej sekcji). Z kilku czekających kopii
 > tego samego adresu wychodzi ta z najmniejszym id — także przy dwóch równoległych
 > przebiegach. Automat nie wysyła powitań starszych niż `AUTO_SEND_MAX_AGE_DAYS` (14 dni).
 > Taka wiadomość dostaje `skipped` z powodem zamiast wysyłki. Bramka przy kolejkowaniu nie
 > wystarcza — kolejka potrafi czekać godzinami, a wiadomości zakolejkowane przed zmianą
-> reguł też muszą przez nie przejść. Szybka wysyłka 1-do-1 nie jest blokowana historią
-> wysłanych (świadoma decyzja operatora), tylko blokadą adresu i równoległą kopią.
+> reguł też muszą przez nie przejść. Wiadomości bez kampanii ze źródłem `quick_send` —
+> szybka wysyłka 1-do-1 **oraz** wysyłka „do wszystkich” (kod ich nie rozróżnia) — nie są
+> blokowane historią wysłanych, tylko blokadą adresu i równoległą kopią. Przy szybkiej
+> wysyłce to świadoma decyzja operatora, a kontrola działa dopiero przy ponowieniu
+> z kolejki: pierwsza próba z `/send` omija ją w całości (także blokadę adresu).
+> „Do wszystkich” odsiewa historię sekcji tylko przy kolejkowaniu. Zgody RODO kontrola tuż przed wysyłką nie sprawdza (patrz „RODO”).
 >
 > **Martwy link wypisu wstrzymuje wysyłkę.** Jeśli szablon Resend zawiera
 > `{{{RESEND_UNSUBSCRIBE_URL}}}`, wiadomości z kolejki czekają (bez zużycia prób), aż szablon
 > zostanie poprawiony na `{{{link_wypisu}}}` i opublikowany. Strona kampanii mówi to wprost.
+> Kontrola wymaga klucza API, który może czytać szablony — przy kluczu „Sending access”
+> jej nie ma i mail wychodzi z martwym linkiem (patrz niżej).
 >
 > Każde wywołanie Resend niesie `Idempotency-Key` = wiadomość + **runda** prób
 > (`aura-hub/{id}/{runda}`, 3 próby na rundę). W obrębie rundy klucz się nie zmienia, więc
@@ -134,7 +182,11 @@ jest wpis `crm_history` (`type='email'`). Migracja dotyczy wyłącznie modułu e
 > zeruje licznika, tylko zaczyna nową rundę — z nowym kluczem, więc naprawdę wysyła.
 > Odpowiedź 429 (limit na sekundę, dzienny albo miesięczny) nie zużywa próby i przerywa
 > partię. Nieudany odczyt szablonu Resend (nadawca) nie spada po cichu na `RESEND_FROM` —
-> wiadomość czeka na kolejną próbę.
+> wiadomość czeka na kolejną próbę. Wyjątek: klucz API bez prawa odczytu szablonów
+> (401/403, „Sending access”). Wtedy HUB wysyła z nadawcą kampania → sekcja → `RESEND_FROM`
+> (nadawcy zapisanego w szablonie nie widzi), **bez** kontroli martwego linku wypisu, i przez
+> 5 min nie pyta ponownie o szablony. Strona kampanii o tym ostrzega. Naprawa: nadawca
+> w sekcji albo klucz z „Full access”.
 
 ## Resend — konfiguracja
 
@@ -150,10 +202,13 @@ jest wpis `crm_history` (`type='email'`). Migracja dotyczy wyłącznie modułu e
    > więc zdarzenia `email.opened` w ogóle nie powstają** — sam przełącznik to za mało.
    > Tracking działa **per-domena**; API `POST /emails` nie ma pola `track_opens` — nie da
    > się go włączyć per-wiadomość z poziomu kodu.
-3. Utwórz szablony (Templates) i wpisz ich id/alias w `/categories`. W treści użyj
-   zmiennych `{{firma}}`, `{{kontakt}}`, `{{miasto}}`, `{{nip}}` oraz `{{{link_wypisu}}}`
-   jako linku wypisu (HUB wstawia tam `RESEND_UNSUBSCRIBE_URL`). Zadeklaruj ją w szablonie
-   z wartością domyślną, np. `mailto:` na monitorowaną skrzynkę.
+3. Utwórz szablony (Templates) i wpisz ich id/alias w `/categories` — chyba że sekcja ma
+   treść z Edytora e-mail (`html_body`); wtedy szablon nie jest używany. W treści użyj
+   zmiennych `{{firma}}`, `{{kontakt}}`, `{{miasto}}`, `{{nip}}`, w sekcjach z trybem
+   „Linki do pobrania” `{{{pliki_html}}}` (lista plików — bez niej mail wychodzi bez
+   plików, bez żadnego błędu) oraz `{{{link_wypisu}}}` jako linku wypisu (HUB wstawia tam
+   `RESEND_UNSUBSCRIBE_URL`). Zmienną `link_wypisu` zadeklaruj w szablonie z wartością domyślną, np. `mailto:`
+   na monitorowaną skrzynkę.
 
    > ⚠️ **`{{{RESEND_UNSUBSCRIBE_URL}}}` nie działa przy wysyłce z HUB.** Resend wypełnia ją
    > tylko w Broadcasts; HUB wysyła przez `POST /emails`, więc link wychodził jako `href=""`
@@ -161,7 +216,9 @@ jest wpis `crm_history` (`type='email'`). Migracja dotyczy wyłącznie modułu e
 
    **Nadawca:** kampania → sekcja (`/categories`) → nadawca zapisany w szablonie Resend →
    `RESEND_FROM`. Wcześniej `RESEND_FROM` wygrywał z szablonem, więc newsletter
-   UtrataDochodu wychodził jako „Beauty❤️Polisa”.
+   UtrataDochodu wychodził jako „Beauty❤️Polisa”. Krok z szablonem wymaga klucza API
+   z prawem odczytu szablonów (*Full access*). Przy kluczu *Sending access* łańcuch to
+   kampania → sekcja → `RESEND_FROM` — wtedy ustaw nadawcę w sekcji.
 4. Webhook: endpoint `POST /api/webhooks/resend`, subskrybuj `email.delivered`,
    `email.opened`, `email.clicked`, `email.bounced`, `email.complained`, a także
    `email.suppressed` i `email.failed` — bez nich mail zablokowany przez Resend
@@ -181,6 +238,10 @@ konfiguracja Resend. Sprawdź po kolei:
 3. Webhook subskrybuje zdarzenie **`email.opened`** i endpoint zwraca 2xx (nie 401 —
    to znak, że `RESEND_WEBHOOK_SECRET` w aplikacji ≠ sekret z panelu Resend).
 4. Test na skrzynce **z włączonymi obrazkami** (patrz niżej — wiele klientów je blokuje).
+5. Maile wysłane, **zanim webhook subskrybował `email.opened`**, nie dostaną otwarć
+   z webhooka. Uzupełnisz je przyciskiem „Uzupełnij statystyki z Resend” w Historii wysyłek
+   (partie po 25 — klikaj, dopóki komunikat pokazuje „Zostało …”). API Resend podaje tylko
+   ostatni stan, więc data otwarcia jest przybliżona, a wpis ma `stats_backfilled_at`.
 
 Uwaga: open tracking bywa niedokładny (blokowanie obrazków, prefetch, Apple Mail Privacy
 Protection, przycinanie w Gmailu) — kliknięcia to pewniejszy sygnał; dashboard opisuje
@@ -226,7 +287,10 @@ przez `/l/`. Bez synchronizacji raport pokazywałby dla takich linków zero.
 >
 > Dlatego `/utm/raport` ma kolumnę **Wejścia**, zasilaną z Analytics Engine (`loadCampaignEntries`
 > w `src/lib/server/analytics.ts`). To jedyny licznik, który widzi ruch niezależnie od drogi,
-> jaką ktoś przyszedł. Kampanie widoczne w ruchu, ale nieobecne w bibliotece linków, dopisują
+> jaką ktoś przyszedł — ale tylko na serwisach mierzonych przez analitykę (`MEASURED_HOSTS`
+> w `src/lib/analytics.ts`). `auraexpert.pl` jest w seedzie serwisów, a nie jest mierzony:
+> kolumna Wejścia jest dla niego zawsze pusta, a kampania z pełnym adresem `utm_*` kierująca
+> wyłącznie na niego ma zero i kliknięć, i wejść, nawet jeśli działa. Kampanie widoczne w ruchu, ale nieobecne w bibliotece linków, dopisują
 > się do tabeli same — link do reklamy bywa sklejany z pominięciem generatora.
 >
 > Kolumna liczy **ostatnie 30 dni**, bo tyle bierzemy z Analytics Engine; kliknięcia są
@@ -235,7 +299,9 @@ przez `/l/`. Bez synchronizacji raport pokazywałby dla takich linków zero.
 
 Skracanie w Bitly jest zawsze świadomym kliknięciem, nigdy automatem — plan Starter ma
 **50 linków na miesiąc**, a licznik zużycia widać nad listą linków. Bez `BITLY_TOKEN`
-przycisk jest ukryty; krótki link można wtedy wkleić ręcznie w edycji linku.
+przycisk jest ukryty; krótki link można wtedy wkleić ręcznie w edycji linku, ale jego
+kliknięć HUB nie pobierze („Statystyki Bitly” synchronizują tylko linki skrócone
+przyciskiem) — trzeba je sprawdzać w panelu Bitly.
 
 Trasa `/l/{slug}` jest publiczna (prefiks dodany w `src/hooks.server.ts`). Linki
 zarchiwizowane nadal przekierowują — raz wydrukowana ulotka nie przestaje działać, bo
@@ -326,11 +392,14 @@ reguł, które łatwo złamać przy dokładaniu kolejnego ekranu.
 3. **Jeden wiersz, jedna rzecz główna.** Nazwa firmy w `.cell-main`, reszta
    (osoba, NIP, telefon) w `.cell-sub` — mniejsza i wyszarzona. Siedem kolumn
    o tej samej wadze czyta się jak tabela parametrów.
-4. **Zieleń w tabeli znaczy „zadzwoń", nigdy „wpadło dzisiaj".** Wiersz świeci
-   na zielono (`.row-hot`) wyłącznie wtedy, gdy zapis jest świeży **i** klient
-   prosi o konsultację. Świeży wpis bez konsultacji dostaje spokojny akcent
-   (`.row-today`). Gdyby zieleń świeciła na każdym dzisiejszym wierszu,
-   przestałaby cokolwiek znaczyć.
+4. **Zieleń w tabeli znaczy „zadzwoń", nigdy „wpadło dzisiaj".** W Bazie Klientów
+   (`/clients`) wiersz świeci na zielono (`.row-hot`) wyłącznie wtedy, gdy zapis
+   jest świeży (ostatnie 7 dni, `NOWY_PRZEZ_DNI`) **i** klient prosi o konsultację.
+   Dzisiejszy wpis bez konsultacji dostaje spokojny akcent (`.row-today`), starszy
+   żadnego. Gdyby zieleń świeciła na każdym dzisiejszym wierszu, przestałaby
+   cokolwiek znaczyć. Zapisy dzienne (`/signups`) tę regułę dziś łamią: `.row-hot`
+   dostaje tam każda konsultacja bez względu na datę, a nagłówek dzisiejszego dnia
+   (`.today-sep`) jest zielony.
 5. **Kolor kategorii pochodzi z jednego miejsca** — `CODE_COLORS`
    w `src/lib/categories.ts`, wskazujące zmienne `--c-*` z `src/app.css`.
    Osiem kategorii ma osiem rozróżnialnych barw, osobno dla motywu jasnego
@@ -353,20 +422,29 @@ reguł, które łatwo złamać przy dokładaniu kolejnego ekranu.
    nadal rozdziela metryki, ale przy okazji rysuje dane.
 10. **Sparkline ma stały rozmiar w pikselach**, nie płynny. Rozciąganie w jednej
     osi zrobiłoby z kropki końcowej elipsę.
-11. **Podpis metryki dosuwamy do dołu** (`margin-top: auto`). Bez tego metryka
-    z dwuliniowym podpisem podnosi sparkline sąsiadki i rząd robi się poszarpany.
+11. **Dopisek pod metryką dosuwamy do dołu** (`.kpi-sub`, `margin-top: auto`).
+    Bez tego, gdy sąsiednia karta jest wyższa (np. ma dwuliniowy podpis), dopiski
+    kończą się na różnych wysokościach i rząd robi się poszarpany.
 
 ## RODO (wymóg twardy)
 
 - **Zgody RODO są zebrane dla całej bazy Klientów** (potwierdzone przez właściciela
   danych). Interpretacja zgody: `hasRodoConsent(crm_companies.rodo)` w
   `src/lib/categories.ts` — puste/nieuzupełnione pole `rodo` liczy się jako zgoda;
-  wykluczany jest **wyłącznie wyraźny sprzeciw** (`nie`, `false`, `0`, `brak`,
-  `sprzeciw`, …, patrz `RODO_REFUSED`). Kontakt ze sprzeciwem → `skipped`.
-- Bramka RODO obowiązuje tak samo dla kampanii masowych i dla wysyłki „do wszystkich"
-  wg kategorii (`/clients/kategorie`).
-- Surowa wartość pola `rodo` z momentu wysyłki jest zapisywana w
-  `email_messages.rodo_snapshot` (audyt) — niezależnie od interpretacji.
+  wykluczany jest **wyłącznie wyraźny sprzeciw**: cała wartość pola (po `trim`, małymi
+  literami) musi być jedną z `RODO_REFUSED` (`nie`, `false`, `0`, `no`, `off`, `brak`,
+  `brak zgody`, `sprzeciw`). Inny tekst, np. „nie wyrażam zgody”, liczy się jako zgoda.
+- Bramka RODO (`recipientGate` w `src/lib/server/sender.ts`) obowiązuje tak samo dla
+  kampanii masowych, dla wysyłki „do wszystkich" wg kategorii (`/clients/kategorie`) i dla
+  automatu. Kontakt ze sprzeciwem nie trafia do kolejki: w kampanii dostaje wiersz
+  `skipped` z powodem, w „do wszystkich” jest tylko liczony jako pominięty, automat pomija
+  go bez wiersza.
+- Bramka działa **tylko przy kolejkowaniu**. Kontrola tuż przed wysyłką
+  (`recipientHoldReason`) sprawdza blokadę i duplikat, ale nie zgodę — sprzeciw wpisany
+  w CRM później nie zatrzyma wiadomości, która już czeka w kolejce.
+- Surowa wartość pola `rodo` z chwili utworzenia wiadomości jest zapisywana w
+  `email_messages.rodo_snapshot` (audyt) — niezależnie od interpretacji. Dla kampanii,
+  „do wszystkich” i automatu to moment zakolejkowania, nie wysyłki.
 - Szybka wysyłka 1-do-1 jest inicjowana ręcznie przez operatora; również zawiera link
   wypisu i jest logowana.
 
@@ -391,18 +469,31 @@ reguł, które łatwo złamać przy dokładaniu kolejnego ekranu.
 - Cała wiadomość ≤ 40 MB; Base64 dokłada ~33% → bezpieczny łączny rozmiar załączników
   ~28 MB (pilnowane przy uploadzie i przed wysyłką).
 - Załączniki działają tylko przy wysyłce pojedynczej (nie batch) — stąd kolejka.
-- Pliki z prywatnego bucketa idą w mailu jako `content` (Base64), bez publicznych linków.
+- Sposób dostarczenia plików z prywatnego bucketa zależy od trybu sekcji
+  (`email_categories.attachment_mode`): `attachments` (domyślny) — pliki idą w mailu jako
+  `content` (Base64), łącznie ≤ ~28 MB; `links` — mail bez załączników, w `{{{pliki_html}}}`
+  lista linków do publicznego `/files/{asset_id}`, który bez logowania przekierowuje na
+  signed URL ważny 10 min. Endpoint wydaje każdy plik z biblioteki po samym UUID, więc tryb
+  `links` jest wyłącznie dla materiałów produktowych (OWU, ulotki), nie dla danych osobowych.
 - Analityka i segmentacja liczą na kodach kanonicznych, nie na surowym `ubezpieczenie`.
 
 ## Deploy (Cloudflare)
 
-1. Aplikacja: Cloudflare Pages z adapterem `@sveltejs/adapter-cloudflare`;
-   ustaw zmienne środowiskowe z `.env.example` w projekcie Pages.
+1. Aplikacja: Cloudflare Pages z adapterem `@sveltejs/adapter-cloudflare`. Produkcję Pages
+   buduje z gałęzi `main` — każdy push na `main` uruchamia build i wdrożenie. Ustaw zmienne
+   środowiskowe z `.env.example` w projekcie Pages.
 2. Cron: `cd workers/queue-cron && npx wrangler deploy`, ustaw `HUB_URL` w `wrangler.toml`
    i sekret `npx wrangler secret put QUEUE_CRON_SECRET` (ta sama wartość co w aplikacji).
    Sprawdzenie, że działa: `npx wrangler tail aura-hub-queue-cron` (co minutę wpis,
    bez `HTTP 401`) i znika ostrzeżenie „Kolejka stoi” w panelu.
    Sekret generuj losowo (`openssl rand -hex 32`) i nigdy nie wpisuj go do repozytorium.
+3. Analityka: `cd workers/analytics-collector && npx wrangler deploy` (Worker
+   `aura-analytics-collector`; trasy, KV `VISITOR_SALT` i znany błąd uprawnień Workers
+   Routes — patrz `CLAUDE.md`).
+
+> Oba Workery (`queue-cron`, `analytics-collector`) wdraża się ręcznie — push na `main` ich
+> nie aktualizuje. Collector wbudowuje `src/lib/utm.ts` (`slugifyUtm`) i `src/lib/analytics.ts`
+> (`MEASURED_HOSTS`, `VITALS`), więc po zmianie tych plików trzeba go wdrożyć ponownie.
 
 > Uwaga do wdrożeń: przywracanie/aktualizacja produkcji dotyczy **wyłącznie kodu aplikacji**.
 > Konfiguracja **autoryzacji i weryfikacji Supabase pozostaje nietknięta** (patrz sekcja
