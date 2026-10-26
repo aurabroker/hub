@@ -4,6 +4,8 @@
 		value: number;
 		/** Pełniejsza etykieta do tooltipa (domyślnie label). */
 		title?: string;
+		/** Gotowa wartość do tooltipa, np. „1 234,56 zł" (domyślnie `format(value)`). */
+		display?: string;
 	}
 
 	let {
@@ -11,7 +13,8 @@
 		color = 'var(--data-1)',
 		height = 180,
 		width = 720,
-		maxXLabels = 10
+		maxXLabels = 10,
+		format = (n: number) => String(n)
 	}: {
 		data: Point[];
 		color?: string;
@@ -25,6 +28,8 @@
 		 */
 		width?: number;
 		maxXLabels?: number;
+		/** Tekst wartości na osi i w tooltipie. Domyślnie surowa liczba. */
+		format?: (n: number) => string;
 	} = $props();
 
 	const PAD_LEFT = 34;
@@ -37,8 +42,12 @@
 	let step = $derived(innerW / Math.max(1, data.length));
 	let barW = $derived(Math.max(3, Math.min(40, step - 2)));
 	let labelEvery = $derived(Math.max(1, Math.ceil(data.length / maxXLabels)));
-	// Set usuwa duplikaty (przy max=1 obie linie siatki wypadałyby na 1)
-	let gridValues = $derived([...new Set([0.5, 1].map((f) => Math.round(max * f)))]);
+	// Set usuwa duplikaty (przy max=1 obie linie siatki wypadałyby na 1).
+	// W dół, nie do najbliższej: przy ułamkowym max (1,5 konwersji) zaokrąglenie
+	// w górę dawało linię 2 nad wykresem, poza viewBoxem. Zero to oś, nie linia.
+	let gridValues = $derived(
+		[...new Set([0.5, 1].map((f) => Math.floor(max * f)))].filter((v) => v > 0)
+	);
 </script>
 
 {#if data.length === 0}
@@ -58,7 +67,7 @@
 				y={y + 3}
 				text-anchor="end"
 				font-size="10"
-				fill="var(--color-text-faint)">{gv}</text
+				fill="var(--color-text-faint)">{format(gv)}</text
 			>
 		{/each}
 		<line
@@ -83,7 +92,7 @@
 					fill={color}
 					clip-path="inset(0 0 4px 0)"
 				>
-					<title>{d.title ?? d.label}: {d.value}</title>
+					<title>{d.title ?? d.label}: {d.display ?? format(d.value)}</title>
 				</rect>
 				{#if i % labelEvery === 0}
 					<text

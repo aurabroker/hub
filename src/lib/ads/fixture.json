@@ -37,12 +37,12 @@
 		"previous": {
 			"impressions": 4410,
 			"clicks": 367,
-			"cost": 1098.2,
+			"cost": 798.4,
 			"conversions": 8,
 			"other_networks_cost": 0,
 			"ctr": 0.0832,
-			"cpc": 2.99,
-			"cpa": null,
+			"cpc": 2.18,
+			"cpa": 99.8,
 			"search_is": 0.5,
 			"lost_is_rank": 0.42,
 			"lost_is_budget": 0.08

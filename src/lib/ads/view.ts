@@ -186,7 +186,8 @@ export interface TrendSeries {
 	title: string;
 	unit: string;
 	color: string;
-	points: { label: string; title: string; value: number }[];
+	/** `display` to wartość po polsku do tooltipa („1 234,56 zł", „8,5"). */
+	points: { label: string; title: string; value: number; display: string }[];
 }
 
 /**
@@ -194,8 +195,9 @@ export interface TrendSeries {
  * nieporównywalne: kilkadziesiąt kliknięć i kilkaset złotych na jednej osi
  * spłaszczyłyby kliknięcia do kreski.
  *
- * Kwoty zaokrąglamy do pełnych złotych — wykres pokazuje kształt, a etykiety
- * osi i tak są całkowite.
+ * Wartości zostają dokładne, a tekst do tooltipa przychodzi gotowy — wykres
+ * sam pokazałby surową liczbę JS („8.5", „1234.56"). Etykiety osi formatuje
+ * strona (`formatInt`), bo funkcja nie przejdzie z `load` do przeglądarki.
  */
 export function buildTrend(trend: AdsTrendPoint[]): TrendSeries[] {
 	const series = (
@@ -203,7 +205,7 @@ export function buildTrend(trend: AdsTrendPoint[]): TrendSeries[] {
 		title: string,
 		unit: string,
 		color: string,
-		round: (n: number) => number
+		display: (n: number) => string
 	): TrendSeries => ({
 		key,
 		title,
@@ -219,17 +221,18 @@ export function buildTrend(trend: AdsTrendPoint[]): TrendSeries[] {
 				{
 					label: formatShortDate(t.period_end),
 					title: start ? formatPeriod(start, t.period_end) : formatDate(t.period_end),
-					value: round(v)
+					value: v,
+					display: display(v)
 				}
 			];
 		})
 	});
 
 	return [
-		series('clicks', 'Kliknięcia', 'tygodniowo', 'var(--data-1)', Math.round),
-		series('cost', 'Koszt', 'zł tygodniowo', 'var(--data-4)', Math.round),
-		series('conversions', 'Konwersje', 'tygodniowo', 'var(--data-6)', (n) => Math.round(n * 100) / 100),
-		series('cpa', 'Koszt konwersji', 'zł', 'var(--data-3)', Math.round)
+		series('clicks', 'Kliknięcia', 'tygodniowo', 'var(--data-1)', formatInt),
+		series('cost', 'Koszt', 'zł tygodniowo', 'var(--data-4)', formatMoney),
+		series('conversions', 'Konwersje', 'tygodniowo', 'var(--data-6)', formatCount),
+		series('cpa', 'Koszt konwersji', 'zł', 'var(--data-3)', formatMoney)
 	];
 }
 
@@ -396,8 +399,19 @@ export function buildAdsView(input: AdsViewInput) {
 				: null,
 
 		alerts: buildAlerts(r.alerts),
-		kpis: report ? buildKpis(r.kpi?.current, r.kpi?.previous, trend) : [],
+		// Sparkline kończy się na oglądanym tygodniu: jej końcowa kropka stoi
+		// przy liczbie z karty, więc późniejsze tygodnie udawałyby historię,
+		// która do tej liczby nie prowadzi.
+		kpis: report
+			? buildKpis(
+					r.kpi?.current,
+					r.kpi?.previous,
+					input.period ? trend.filter((t) => t.period_end <= input.period!) : trend
+				)
+			: [],
 
+		/** Wszystkie tygodnie w archiwum — trend pokazuje najwyżej TREND_WEEKS z nich. */
+		savedWeeks: archive.length,
 		trendWeeks: trend.length,
 		trend: trend.length >= MIN_TREND_WEEKS ? buildTrend(trend) : [],
 

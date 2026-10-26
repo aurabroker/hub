@@ -1,6 +1,7 @@
 <script lang="ts">
 	import BarChart from '$lib/components/BarChart.svelte';
 	import Sparkline from '$lib/components/Sparkline.svelte';
+	import { formatInt } from '$lib/ads/format';
 	import type { PageServerData } from './$types';
 
 	/**
@@ -53,7 +54,10 @@
 			Skrypt Google Ads nie przysłał jeszcze żadnego raportu. Raporty przychodzą co poniedziałek
 			około 06:00 na <span class="mono">POST /api/webhooks/ads-report</span>, z tokenem
 			<span class="mono">ADS_REPORT_TOKEN</span> w nagłówku
-			<span class="mono">Authorization: Bearer …</span>.
+			<span class="mono">Authorization: Bearer …</span> i z
+			<span class="mono">Content-Type: application/json</span> (w UrlFetchApp:
+			<span class="mono">contentType: 'application/json'</span>). Bez tego typu treści serwer
+			odpowiada 403 jeszcze przed sprawdzeniem tokenu.
 		</p>
 	</div>
 {:else if data.header}
@@ -119,7 +123,12 @@
 	<div class="card">
 		<div class="card-head">
 			<h3>Trend tygodniowy</h3>
-			<span class="faint">zapisane tygodnie: {data.trendWeeks}</span>
+			<span class="faint">
+				zapisane tygodnie: {data.savedWeeks}
+				{#if data.savedWeeks > data.trendWeeks}
+					· na wykresach ostatnie {data.trendWeeks}
+				{/if}
+			</span>
 		</div>
 		{#if data.trend.length === 0}
 			<p class="muted small">
@@ -134,7 +143,14 @@
 							<span class="trend-title">{s.title}</span>
 							<span class="faint">{s.unit}</span>
 						</div>
-						<BarChart data={s.points} color={s.color} width={420} height={150} maxXLabels={6} />
+						<BarChart
+							data={s.points}
+							color={s.color}
+							format={formatInt}
+							width={420}
+							height={150}
+							maxXLabels={6}
+						/>
 					</div>
 				{/each}
 			</div>

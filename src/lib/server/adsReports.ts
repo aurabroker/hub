@@ -104,12 +104,9 @@ async function readCapped(request: Request, max: number): Promise<Uint8Array | n
 		const { done, value } = await reader.read();
 		if (done) break;
 		total += value.byteLength;
-		if (total > max) {
-			await reader.cancel().catch(() => {});
-			return null;
-		}
 		chunks.push(value);
 	}
+	if (total > max) return null;
 	const out = new Uint8Array(total);
 	let offset = 0;
 	for (const chunk of chunks) {
@@ -157,9 +154,15 @@ export function validateReport(payload: unknown): string[] {
 	return errors;
 }
 
-/** Znacznik czasu tylko wtedy, gdy to prawdziwa data ISO; inaczej null. */
+/**
+ * Znacznik czasu tylko wtedy, gdy to prawdziwa data ISO; inaczej null.
+ * Część z datą sprawdzamy osobno, bo `Date.parse` w V8 nie odrzuca
+ * 2026-02-30T05:00:00Z, tylko przenosi go na 2 marca — zapisalibyśmy chwilę,
+ * której skrypt nigdy nie wysłał.
+ */
 function isoTimestamp(value: unknown): string | null {
 	if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(value)) return null;
+	if (!isIsoDate(value.slice(0, 10))) return null;
 	const ts = Date.parse(value);
 	return Number.isFinite(ts) ? new Date(ts).toISOString() : null;
 }

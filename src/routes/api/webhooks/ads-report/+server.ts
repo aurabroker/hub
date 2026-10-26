@@ -13,6 +13,16 @@ import type { RequestHandler } from './$types';
  *
  * Trasa jest publiczna przez prefiks /api/webhooks/ w hooks.server.ts;
  * chroni ją token ADS_REPORT_TOKEN w nagłówku `Authorization: Bearer …`.
+ *
+ * Skrypt MUSI wysyłać `Content-Type: application/json` (w UrlFetchApp opcja
+ * `contentType: 'application/json'`). Bez niej UrlFetchApp wysyła
+ * application/x-www-form-urlencoded bez nagłówka Origin, a wbudowana ochrona
+ * CSRF SvelteKita odrzuca takie żądanie odpowiedzią 403 „Cross-site POST form
+ * submissions are forbidden" — zanim ta funkcja w ogóle się wykona (to samo
+ * dla text/plain). Na serwerze deweloperskim ta kontrola nie działa, więc
+ * lokalnie problemu nie widać. Nie wyłączamy `csrf.checkOrigin` dla całej
+ * aplikacji: osłabiłoby to każdy formularz panelu, a SvelteKit nie ma
+ * wyjątku dla pojedynczej trasy.
  */
 export const POST: RequestHandler = async ({ request }) => {
 	return handleAdsReportPost(request, {

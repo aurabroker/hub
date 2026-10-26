@@ -91,6 +91,34 @@ describe('autoryzacja', () => {
 		expect(res.status).toBe(200);
 	});
 
+	// Kolejność kontroli: konfiguracja → token → rozmiar → treść. Bez tokenu
+	// serwer nie może czytać megabajta ani zdradzać w `details`, jakich pól
+	// oczekuje — dlatego treść w tych testach jest celowo zła.
+	it('401 przed czytaniem treści: zły JSON bez tokenu nie jest nawet otwierany', async () => {
+		const request = withoutAuth('{not json');
+		const { res, body } = await send(request);
+		expect(res.status).toBe(401);
+		expect(body.details).toBeUndefined();
+		expect(request.bodyUsed).toBe(false);
+	});
+
+	it('401 przed limitem rozmiaru: zły token i Content-Length ponad 1 MB', async () => {
+		const request = post('{}', {
+			authorization: 'Bearer zly-token',
+			'content-length': String(MAX_REPORT_BYTES + 1)
+		});
+		const { res } = await send(request);
+		expect(res.status).toBe(401);
+		expect(request.bodyUsed).toBe(false);
+	});
+
+	it('503 przed wszystkim innym: brak konfiguracji i zła treść', async () => {
+		const request = withoutAuth('{not json');
+		const { res } = await send(request, null);
+		expect(res.status).toBe(503);
+		expect(request.bodyUsed).toBe(false);
+	});
+
 	it('tokenMatches porównuje skróty o stałej długości', async () => {
 		expect(await tokenMatches(TOKEN, TOKEN)).toBe(true);
 		expect(await tokenMatches('', TOKEN)).toBe(false);
@@ -111,12 +139,17 @@ describe('limit rozmiaru', () => {
 	it('413 dla treści bez Content-Length (strumień liczony w locie)', async () => {
 		const chunk = new TextEncoder().encode('x'.repeat(64 * 1024));
 		let sent = 0;
+		let cancelled = false;
+		// Strumień bez końca: nigdy nie wywołuje close(). Kod, który najpierw
+		// czyta wszystko, a limit sprawdza dopiero na końcu, zawiśnie tu
+		// i test padnie na przekroczeniu czasu zamiast przejść.
 		const stream = new ReadableStream<Uint8Array>({
 			pull(controller) {
-				// Strumień dłuższy niż limit: 17 × 64 kB > 1 MB.
-				if (sent >= 17) return controller.close();
 				sent++;
 				controller.enqueue(chunk);
+			},
+			cancel() {
+				cancelled = true;
 			}
 		});
 		const request = new Request(URL, {
@@ -129,8 +162,9 @@ describe('limit rozmiaru', () => {
 		expect(request.headers.get('content-length')).toBeNull();
 		const { res } = await send(request);
 		expect(res.status).toBe(413);
-		// Czytanie przerwane zaraz po przekroczeniu limitu, nie po całym strumieniu.
-		expect(sent).toBeLessThanOrEqual(17);
+		// 17 × 64 kB przekracza 1 MB; najwyżej jeden kawałek pobrany na zapas.
+		expect(sent).toBeLessThanOrEqual(18);
+		expect(cancelled).toBe(true);
 	});
 });
 
@@ -200,6 +234,13 @@ describe('zapis', () => {
 
 	it('generated_at niebędący datą ISO zapisuje się jako null', async () => {
 		const report = { ...structuredClone(fixture), generated_at: 'wczoraj' };
+		const { res, rows } = await send(post(JSON.stringify(report)));
+		expect(res.status).toBe(200);
+		expect(rows.get('2026-11-01')!.generated_at).toBeNull();
+	});
+
+	it('generated_at z niemożliwą datą zapisuje się jako null, a nie jako 2 marca', async () => {
+		const report = { ...structuredClone(fixture), generated_at: '2026-02-30T05:00:00Z' };
 		const { res, rows } = await send(post(JSON.stringify(report)));
 		expect(res.status).toBe(200);
 		expect(rows.get('2026-11-01')!.generated_at).toBeNull();
