@@ -325,6 +325,120 @@ function buildSettings(settings: unknown): { label: string; value: string; badge
 	];
 }
 
+/** Liczba do sortowania: brak wartości liczy się jak zero. */
+function metric(value: unknown): number {
+	return toNumber(value) ?? 0;
+}
+
+/** Tekst do sortowania: brak wartości to pusty ciąg (ląduje na początku). */
+function sortText(value: unknown): string {
+	return typeof value === 'string' ? value.trim() : '';
+}
+
+function compareText(a: unknown, b: unknown): number {
+	return sortText(a).localeCompare(sortText(b), 'pl');
+}
+
+/**
+ * Najpierw to, co kosztowało, potem to, co klikano, potem to, co tylko się
+ * wyświetlało. Malejąco po pieniądzach, bo to pytanie, z którym ktoś tu
+ * przychodzi: „na co poszedł budżet".
+ */
+function byWeight(a: Record<string, unknown>, b: Record<string, unknown>): number {
+	return (
+		metric(b.cost) - metric(a.cost) ||
+		metric(b.clicks) - metric(a.clicks) ||
+		metric(b.impressions) - metric(a.impressions)
+	);
+}
+
+/** Stabilne sortowanie: przy remisie zostaje kolejność ze skryptu. */
+function sortStable<T>(list: T[], compare: (a: T, b: T) => number): T[] {
+	return list
+		.map((item, i) => ({ item, i }))
+		.sort((a, b) => compare(a.item, b.item) || a.i - b.i)
+		.map((x) => x.item);
+}
+
+function keywordRow(k: Record<string, unknown>) {
+	return {
+		keyword: formatText(k.keyword),
+		adGroup: formatText(k.ad_group),
+		matchType: matchTypeLabel(k.match_type),
+		status: formatText(k.status),
+		statusBadge: statusBadge(k.status),
+		qualityScore: formatInt(k.quality_score),
+		impressions: formatInt(k.impressions),
+		clicks: formatInt(k.clicks),
+		cost: formatMoney(k.cost),
+		conversions: formatCount(k.conversions),
+		cpa: formatMoney(k.cpa)
+	};
+}
+
+export type KeywordRow = ReturnType<typeof keywordRow>;
+
+/**
+ * Słowa kluczowe w dwóch grupach. Skrypt przysyła wszystkie słowa kampanii,
+ * także z wstrzymanych grup reklam — w realnym raporcie 12 z 658 miało
+ * wyświetlenia. W kolejności ze skryptu te dwanaście ginęło między zerami.
+ *
+ * Aktywne (wyświetlenia > 0) od najdroższego; reszta po grupie reklam
+ * i słowie, bo tam szuka się konkretnej pozycji, a nie najważniejszej.
+ */
+export function buildKeywords(value: unknown): {
+	total: number;
+	active: KeywordRow[];
+	inactive: KeywordRow[];
+} {
+	const all = rows(value);
+	const active = all.filter((k) => metric(k.impressions) > 0);
+	const inactive = all.filter((k) => metric(k.impressions) <= 0);
+	return {
+		total: all.length,
+		active: sortStable(active, (a, b) => byWeight(a, b) || compareText(a.keyword, b.keyword)).map(
+			keywordRow
+		),
+		inactive: sortStable(
+			inactive,
+			(a, b) => compareText(a.ad_group, b.ad_group) || compareText(a.keyword, b.keyword)
+		).map(keywordRow)
+	};
+}
+
+/** Ile wyszukiwanych haseł widać od razu; reszta w zwiniętej liście. */
+export const SEARCH_TERMS_VISIBLE = 50;
+
+function searchTermRow(t: Record<string, unknown>) {
+	return {
+		term: formatText(t.search_term),
+		adGroup: formatText(t.ad_group),
+		impressions: formatInt(t.impressions),
+		clicks: formatInt(t.clicks),
+		cost: formatMoney(t.cost),
+		conversions: formatCount(t.conversions)
+	};
+}
+
+export type SearchTermRow = ReturnType<typeof searchTermRow>;
+
+/** Wyszukiwane hasła od najdroższego; ponad SEARCH_TERMS_VISIBLE — reszta osobno. */
+export function buildSearchTerms(value: unknown): {
+	total: number;
+	top: SearchTermRow[];
+	rest: SearchTermRow[];
+} {
+	const sorted = sortStable(
+		rows(value),
+		(a, b) => byWeight(a, b) || compareText(a.search_term, b.search_term)
+	).map(searchTermRow);
+	return {
+		total: sorted.length,
+		top: sorted.slice(0, SEARCH_TERMS_VISIBLE),
+		rest: sorted.slice(SEARCH_TERMS_VISIBLE)
+	};
+}
+
 // ---------------------------------------------------------------------------
 // Całość
 // ---------------------------------------------------------------------------
@@ -423,28 +537,9 @@ export function buildAdsView(input: AdsViewInput) {
 			conversions: formatCount(c.conversions)
 		})),
 
-		keywords: rows(r.keywords).map((k) => ({
-			keyword: formatText(k.keyword),
-			adGroup: formatText(k.ad_group),
-			matchType: matchTypeLabel(k.match_type),
-			status: formatText(k.status),
-			statusBadge: statusBadge(k.status),
-			qualityScore: formatInt(k.quality_score),
-			impressions: formatInt(k.impressions),
-			clicks: formatInt(k.clicks),
-			cost: formatMoney(k.cost),
-			conversions: formatCount(k.conversions),
-			cpa: formatMoney(k.cpa)
-		})),
+		keywords: buildKeywords(r.keywords),
 
-		searchTerms: rows(r.search_terms).map((t) => ({
-			term: formatText(t.search_term),
-			adGroup: formatText(t.ad_group),
-			impressions: formatInt(t.impressions),
-			clicks: formatInt(t.clicks),
-			cost: formatMoney(t.cost),
-			conversions: formatCount(t.conversions)
-		})),
+		searchTerms: buildSearchTerms(r.search_terms),
 
 		changes: rows(r.changes).map((c) => {
 			const flag = typeof c.flag === 'string' ? c.flag.trim().toUpperCase() : '';

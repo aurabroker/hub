@@ -403,6 +403,29 @@ HUB nie czyta Google Sheets — kopia w arkuszu jest tylko zapasowa.
 - **Testy:** `npm test` (Vitest) — endpoint na magazynie w pamięci i render zakładki
   z `src/lib/ads/fixture.json`, przykładowego raportu zgodnego z kontraktem.
 
+### Na przyszłość: porównanie z konkurencją
+
+Odłożone (decyzja właściciela, 2026-10-26). Ustalenia z rozpoznania, żeby nie robić go drugi raz:
+
+- **Skrypt tego nie pobierze.** Analiza aukcji (domeny konkurentów, udział w wyświetleniach,
+  współczynnik nakładania się, pozycja wyżej, odsetek na górze strony, przewaga) istnieje
+  w API jako `segments.auction_insight_domain` i `metrics.auction_insight_search_*`, ale jest
+  „not publicly available” — zapytanie ze skryptu kończy się `METRIC_ACCESS_DENIED`. Dostęp
+  mają tylko konta z listy Google, a lista jest zamknięta (wsparcie Google Ads API,
+  2025-12-30). Looker Studio stracił te pola we wrześniu 2024.
+- **Semrush** daje tylko własne szacunki, nie dane z aukcji Google; konto ma subskrypcję,
+  ale zero jednostek API (stan 2026-10-26).
+
+Warianty do wyboru:
+
+| | Jak | Koszt |
+|---|---|---|
+| A | Co tydzień CSV z Analizy aukcji (zeszły tydzień) wgrywany formularzem w `/google-ads`; nowa tabela na wiersze tydzień × domena | ~3 min tygodniowo; migracja + formularz + parser (`< 10%`, `--`, przecinek dziesiętny, nagłówki zależne od języka panelu) |
+| B | Harmonogram raportu Analizy aukcji wysyła CSV na osobne konto Gmail (dostęp „tylko e-mail”), Apps Script przekazuje go na endpoint HUB | bez pracy co tydzień; kruche, wymaga ręcznego testu formatu maila |
+| C | Skrypt dosyła własne udziały: `search_top_impression_share`, `search_absolute_top_impression_share` (bez nazw konkurentów) | jednorazowa zmiana skryptu i kontraktu; do połączenia z A albo B |
+
+Rekomendacja z rozpoznania: A, ewentualnie z C.
+
 ## Zasady wyglądu panelu
 
 Panel jest narzędziem, w które ktoś patrzy codziennie po kilka godzin. Stąd kilka
