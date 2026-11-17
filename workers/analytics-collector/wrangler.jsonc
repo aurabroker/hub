@@ -19,25 +19,59 @@
 	// do postaci bez prefiksu, więc statystyki się nie rozjeżdżają, ale bez
 	// trasy ruch z www w ogóle by przez niego nie przeszedł.
 	//
-	// Utworzenie tras wymaga uprawnienia Workers Routes, którego token konta
-	// nie ma. Jeśli `wrangler deploy` odbije się o brak uprawnień, wdróż
-	// z zakomentowaną sekcją "routes" i dodaj wpisy ręcznie w panelu
-	// Cloudflare, w każdej strefie w sekcji Workers Routes.
+	// Utworzenie tras wymaga uprawnienia Workers Routes, którego token wranglera
+	// nie ma — `wrangler deploy` wgra skrypt i odbije się na trasach. Trasy
+	// zakłada się przez API Cloudflare (konektor MCP ma to uprawnienie) albo
+	// ręcznie w panelu, w każdej strefie w sekcji Workers Routes.
+	//
+	// Lista odpowiada stanowi na żywo z 2026-11-17. Uwagi:
+	// - Gwiazdki (*.auraconsulting.pl, *.grupowe.pro, *.gwarancje.pro) były
+	//   założone ręcznie; łapią www i wewnętrzne aplikacje (crm, app), ale
+	//   collector nic nie zapisuje dla hostów spoza MEASURED_HOSTS.
+	// - W strefie auraexpert.pl celowo BEZ gwiazdki: tam są hub i pliki.
+	// - rozwodochota.pl/* należy do Workera security-headers (jedna trasa =
+	//   jeden Worker), więc z tej domeny mierzymy tylko www.
+	// - www.utratadochodu.pl, www.beautypolisa.eu: dziś bez DNS; trasy są
+	//   założone zawczasu, żeby www liczyło się od chwili dodania rekordu.
 	"routes": [
 		{ "pattern": "utratadochodu.pl/*", "zone_name": "utratadochodu.pl" },
 		{ "pattern": "www.utratadochodu.pl/*", "zone_name": "utratadochodu.pl" },
 		{ "pattern": "auraconsulting.pl/*", "zone_name": "auraconsulting.pl" },
-		{ "pattern": "www.auraconsulting.pl/*", "zone_name": "auraconsulting.pl" },
+		{ "pattern": "*.auraconsulting.pl/*", "zone_name": "auraconsulting.pl" },
 		{ "pattern": "cyber.auraconsulting.pl/*", "zone_name": "auraconsulting.pl" },
 		{ "pattern": "zarzad.auraconsulting.pl/*", "zone_name": "auraconsulting.pl" },
 		{ "pattern": "beautypolisa.eu/*", "zone_name": "beautypolisa.eu" },
 		{ "pattern": "www.beautypolisa.eu/*", "zone_name": "beautypolisa.eu" },
+		{ "pattern": "ergo.beautypolisa.eu/*", "zone_name": "beautypolisa.eu" },
+		{ "pattern": "konsultacja.beautypolisa.eu/*", "zone_name": "beautypolisa.eu" },
+		{ "pattern": "auraexpert.pl/*", "zone_name": "auraexpert.pl" },
+		{ "pattern": "ergo.auraexpert.pl/*", "zone_name": "auraexpert.pl" },
+		{ "pattern": "go.auraexpert.pl/*", "zone_name": "auraexpert.pl" },
 		{ "pattern": "rozwod.waw.pl/*", "zone_name": "rozwod.waw.pl" },
 		{ "pattern": "www.rozwod.waw.pl/*", "zone_name": "rozwod.waw.pl" },
+		{ "pattern": "rozwodbemowo.pl/*", "zone_name": "rozwodbemowo.pl" },
+		{ "pattern": "www.rozwodbemowo.pl/*", "zone_name": "rozwodbemowo.pl" },
+		{ "pattern": "rozwodbielany.pl/*", "zone_name": "rozwodbielany.pl" },
+		{ "pattern": "www.rozwodbielany.pl/*", "zone_name": "rozwodbielany.pl" },
+		{ "pattern": "rozwodjablonna.pl/*", "zone_name": "rozwodjablonna.pl" },
+		{ "pattern": "www.rozwodjablonna.pl/*", "zone_name": "rozwodjablonna.pl" },
+		{ "pattern": "rozwodlegionowo.pl/*", "zone_name": "rozwodlegionowo.pl" },
+		{ "pattern": "www.rozwodlegionowo.pl/*", "zone_name": "rozwodlegionowo.pl" },
+		{ "pattern": "rozwodlomianki.pl/*", "zone_name": "rozwodlomianki.pl" },
+		{ "pattern": "www.rozwodlomianki.pl/*", "zone_name": "rozwodlomianki.pl" },
+		{ "pattern": "rozwodmokotow.pl/*", "zone_name": "rozwodmokotow.pl" },
+		{ "pattern": "www.rozwodmokotow.pl/*", "zone_name": "rozwodmokotow.pl" },
+		{ "pattern": "www.rozwodochota.pl/*", "zone_name": "rozwodochota.pl" },
+		{ "pattern": "rozwodtarchomin.pl/*", "zone_name": "rozwodtarchomin.pl" },
+		{ "pattern": "www.rozwodtarchomin.pl/*", "zone_name": "rozwodtarchomin.pl" },
+		{ "pattern": "rozwodwola.pl/*", "zone_name": "rozwodwola.pl" },
+		{ "pattern": "www.rozwodwola.pl/*", "zone_name": "rozwodwola.pl" },
+		{ "pattern": "rozwodzoliborz.pl/*", "zone_name": "rozwodzoliborz.pl" },
+		{ "pattern": "www.rozwodzoliborz.pl/*", "zone_name": "rozwodzoliborz.pl" },
 		{ "pattern": "grupowe.pro/*", "zone_name": "grupowe.pro" },
-		{ "pattern": "www.grupowe.pro/*", "zone_name": "grupowe.pro" },
+		{ "pattern": "*.grupowe.pro/*", "zone_name": "grupowe.pro" },
 		{ "pattern": "gwarancje.pro/*", "zone_name": "gwarancje.pro" },
-		{ "pattern": "www.gwarancje.pro/*", "zone_name": "gwarancje.pro" }
+		{ "pattern": "*.gwarancje.pro/*", "zone_name": "gwarancje.pro" }
 	],
 
 	"observability": { "enabled": true }

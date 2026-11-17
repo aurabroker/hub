@@ -64,7 +64,7 @@ linki UTM).
 | `/utm` | **Generator linków UTM** — budowanie otagowanych linków ze słowników, biblioteka linków, krótkie linki `/l/{slug}` z licznikiem kliknięć, kody QR, skracanie w Bitly |
 | `/utm/slowniki` | Serwisy Aura i kanoniczne wartości `utm_*` |
 | `/utm/raport` | Skuteczność kampanii: kliknięcia (własne + Bitly), wejścia z analityki i leady |
-| `/analityka` | Ruch na ośmiu serwisach Aura: odsłony, kanały, kampanie, Core Web Vitals (opis w `CLAUDE.md`) |
+| `/analityka` | Ruch na serwisach Aura (lista w `CLAUDE.md`): odsłony, kanały, kampanie, Core Web Vitals (opis w `CLAUDE.md`) |
 | `/google-ads` | **Google Ads** — tygodniowy raport kampanii UD_2026: alerty, KPI tydzień do tygodnia, trend do 26 tygodni, ustawienia, konwersje, słowa kluczowe, hasła, zmiany na koncie; archiwum tygodni i pobranie `.md` (opis niżej) |
 
 ## Uruchomienie

@@ -65,19 +65,38 @@ Jeśli trzeba coś dodać, dokładamy na końcu. Nigdy w środku.
 
 ## Mierzone hosty
 
-| Host | Strefa |
-|---|---|
-| utratadochodu.pl | utratadochodu.pl |
-| auraconsulting.pl | auraconsulting.pl |
-| cyber.auraconsulting.pl | auraconsulting.pl |
-| zarzad.auraconsulting.pl | auraconsulting.pl |
-| beautypolisa.eu | beautypolisa.eu |
-| rozwod.waw.pl | rozwod.waw.pl |
-| grupowe.pro | grupowe.pro |
-| gwarancje.pro | gwarancje.pro |
+| Host | Strefa | Uwagi |
+|---|---|---|
+| utratadochodu.pl | utratadochodu.pl | |
+| auraconsulting.pl | auraconsulting.pl | apex przekierowuje na www, które łapie trasa `*.auraconsulting.pl/*` |
+| cyber.auraconsulting.pl | auraconsulting.pl | |
+| zarzad.auraconsulting.pl | auraconsulting.pl | |
+| beautypolisa.eu | beautypolisa.eu | **dziś bez strony** — patrz niżej |
+| ergo.beautypolisa.eu | beautypolisa.eu | kalkulator ERGO Razem, cel linków z mailingów |
+| konsultacja.beautypolisa.eu | beautypolisa.eu | |
+| auraexpert.pl | auraexpert.pl | trasa tylko na apex, bez gwiazdki (w strefie są hub i pliki) |
+| ergo.auraexpert.pl | auraexpert.pl | |
+| go.auraexpert.pl | auraexpert.pl | ten sam kalkulator co ergo.beautypolisa.eu |
+| rozwod.waw.pl | rozwod.waw.pl | |
+| rozwodbemowo.pl, rozwodbielany.pl, rozwodjablonna.pl, rozwodlegionowo.pl, rozwodlomianki.pl, rozwodmokotow.pl, rozwodtarchomin.pl, rozwodwola.pl, rozwodzoliborz.pl | własne strefy | dzielnicowe strony kancelarii (`kancelaria-worker`), apex + www |
+| rozwodochota.pl | rozwodochota.pl | **tylko www** — apex ma trasę Workera `security-headers`, a jedna trasa to jeden Worker |
+| grupowe.pro | grupowe.pro | |
+| gwarancje.pro | gwarancje.pro | |
 
-`hub.auraexpert.pl` celowo **nie jest** mierzony — to panel wewnętrzny i jego
-ruch zaśmiecałby statystyki klientów.
+Celowo **nie są** mierzone: `hub.auraexpert.pl` (panel wewnętrzny — jego ruch
+zaśmiecałby statystyki klientów) i inne aplikacje oraz zasoby: `pliki.`,
+`wnioski.`, `banery.auraexpert.pl`, `portal.`, `podglad.beautypolisa.eu`,
+`app.gwarancje.pro`, `app.utratadochodu.pl`, `crm.`/`cms.auraconsulting.pl`.
+Poza kontem Cloudflare, więc poza zasięgiem collectora: `beautyrazem.pl`.
+
+**beautypolisa.eu nie ma dziś strony.** Worker `beautypolisa` został usunięty
+2026-09-07 razem ze swoją Custom Domain i apex nie ma rekordu A/AAAA/CNAME.
+Wszystkie zdarzenia tego hosta w Analytics Engine to skanery z kodem 530.
+Host zostaje na liście, a trasy `beautypolisa.eu/*` i `www.beautypolisa.eu/*`
+są założone, żeby nowa strona (dziś podgląd za hasłem na
+`podglad.beautypolisa.eu`) liczyła się od pierwszego dnia — wystarczy podpiąć
+jej Workera jako Custom Domain apexu. Sekcja „Serwisy” liczy tylko udane
+odsłony, więc host bez strony się w niej nie pokazuje.
 
 Ta lista jest **wpisana na sztywno** w `src/lib/analytics.ts` (`MEASURED_HOSTS`),
 skąd importuje ją collector (i panel). Ruch na
@@ -87,9 +106,17 @@ skanery odpytują zmyślone subdomeny (widzieliśmy
 i ma mieć niską liczność.
 
 **Dodanie nowego serwisu wymaga trzech rzeczy:** wpisu w `MEASURED_HOSTS`,
-trasy w `wrangler.jsonc` i trasy w panelu Cloudflare, a potem ponownego
+trasy w `wrangler.jsonc` i trasy w Cloudflare, a potem ponownego
 `npx wrangler deploy` collectora — push na `main` go nie aktualizuje. Sama trasa
-nie wystarczy — to świadomy koszt tej osłony.
+nie wystarczy — to świadomy koszt tej osłony. Trasę zakłada się przez API
+Cloudflare (konektor MCP ma uprawnienie Workers Routes, którego nie ma token
+wranglera) albo ręcznie w panelu. Pamiętaj o wariancie `www.`, jeśli ma rekord
+DNS — collector sprowadza go do hosta bez prefiksu, ale bez trasy ruch z www
+w ogóle przez niego nie przechodzi (tak przez dwa miesiące ginął
+www.rozwod.waw.pl).
+
+Trasa przed Workerem na własnej domenie (Custom Domain) działa — tak są
+mierzone rozwod.waw.pl, grupowe.pro, gwarancje.pro i ergo.beautypolisa.eu.
 
 ## Kampanie UTM w analityce
 
@@ -191,7 +218,7 @@ Układ jest ułożony wg tego, jak często się w coś patrzy, a nie wg tego, co
 | Wykres odsłon | Czy ruch rośnie i kiedy były skoki |
 | Najczęściej odwiedzane strony | Co ludzie faktycznie czytają |
 | Kanały ruchu | Skąd przychodzą: wyszukiwarki, social, asystenci AI, kampanie, polecenia, wejścia bezpośrednie |
-| Serwisy | Który z ośmiu serwisów żyje (tylko przy filtrze „wszystkie") |
+| Serwisy | Który serwis żyje — tylko udane odsłony bez skanerów (tylko przy filtrze „wszystkie") |
 | Kiedy Cię czytają | Mapa dzień tygodnia × godzina — kiedy publikować i wysyłać |
 | Szybkość w przeglądarce | Core Web Vitals i podstrony, które ciągną wynik w dół |
 | Ruch z kampanii | Wejścia z parametrami `utm_*` |
@@ -348,7 +375,8 @@ odpowiedzi. Decyzję podjął człowiek, nie agent.
 | Element | Status | Data | Uwagi |
 |---|---|---|---|
 | collector Worker | wdrożony | 2026-09-10 | `aura-analytics-collector`, workers.dev wyłączony |
-| trasy na mierzonych hostach | działają | | 14 wpisów wpisanych ręcznie; ruch widać ze wszystkich ośmiu hostów |
+| trasy na mierzonych hostach | działają | 2026-11-17 | 38 tras = lista w `wrangler.jsonc`. 11 założonych ręcznie 2026-09-07, 27 przez API 2026-11-17 (ergo, konsultacja, auraexpert.pl ×3, www.rozwod.waw.pl, 10 dzielnicowych domen kancelarii z www, www.utratadochodu.pl i www.beautypolisa.eu zawczasu). Collector po zmianie: 0 błędów |
+| beautypolisa.eu | bez strony | 2026-09-07 | Worker strony usunięty, apex bez DNS; w danych tylko skanery z kodem 530 |
 | przestrzeń KV `VISITOR_SALT` | utworzona | 2026-09-07 | `e3d7ef83448e4a5288b3cddedd31af6e` |
 | panel `/analityka` w HUB | wdrożony | 2026-09-10 | Pages buduje z `main`; wymaga `CF_ACCOUNT_ID` i `ANALYTICS_TOKEN` |
 | Web Vitals | działa | 2026-09-10 | pierwsze zgłoszenia z przeglądarek potwierdzone w danych |
