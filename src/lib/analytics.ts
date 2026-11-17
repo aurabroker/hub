@@ -24,6 +24,10 @@ export const MEASURED_HOSTS = [
 	'cyber.auraconsulting.pl',
 	'zarzad.auraconsulting.pl',
 	'beautypolisa.eu',
+	// Kalkulator ERGO Razem (Worker „gohestia” na własnej domenie). Tu lądują
+	// linki z mailingów BeautyPolisa, więc bez pomiaru kampanie e-mail miały
+	// w /utm/raport zero wejść.
+	'ergo.beautypolisa.eu',
 	'rozwod.waw.pl',
 	'grupowe.pro',
 	'gwarancje.pro'

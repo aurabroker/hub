@@ -407,7 +407,7 @@ export async function loadActiveHosts(win: Window): Promise<string[]> {
 /**
  * Porównanie serwisów: odsłony i odwiedzający na każdej ze stron.
  *
- * Sens ma tylko przy filtrze „wszystkie". Przy ośmiu serwisach to pierwsza
+ * Sens ma tylko przy filtrze „wszystkie". Przy dziewięciu serwisach to pierwsza
  * rzecz, którą chce się zobaczyć: który z nich w ogóle żyje.
  */
 export async function loadHostBreakdown(win: Window): Promise<HostRow[]> {

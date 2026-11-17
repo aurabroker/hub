@@ -72,6 +72,7 @@ Jeśli trzeba coś dodać, dokładamy na końcu. Nigdy w środku.
 | cyber.auraconsulting.pl | auraconsulting.pl |
 | zarzad.auraconsulting.pl | auraconsulting.pl |
 | beautypolisa.eu | beautypolisa.eu |
+| ergo.beautypolisa.eu | beautypolisa.eu |
 | rozwod.waw.pl | rozwod.waw.pl |
 | grupowe.pro | grupowe.pro |
 | gwarancje.pro | gwarancje.pro |
@@ -191,7 +192,7 @@ Układ jest ułożony wg tego, jak często się w coś patrzy, a nie wg tego, co
 | Wykres odsłon | Czy ruch rośnie i kiedy były skoki |
 | Najczęściej odwiedzane strony | Co ludzie faktycznie czytają |
 | Kanały ruchu | Skąd przychodzą: wyszukiwarki, social, asystenci AI, kampanie, polecenia, wejścia bezpośrednie |
-| Serwisy | Który z ośmiu serwisów żyje (tylko przy filtrze „wszystkie") |
+| Serwisy | Który z dziewięciu serwisów żyje (tylko przy filtrze „wszystkie") |
 | Kiedy Cię czytają | Mapa dzień tygodnia × godzina — kiedy publikować i wysyłać |
 | Szybkość w przeglądarce | Core Web Vitals i podstrony, które ciągną wynik w dół |
 | Ruch z kampanii | Wejścia z parametrami `utm_*` |
@@ -349,6 +350,7 @@ odpowiedzi. Decyzję podjął człowiek, nie agent.
 |---|---|---|---|
 | collector Worker | wdrożony | 2026-09-10 | `aura-analytics-collector`, workers.dev wyłączony |
 | trasy na mierzonych hostach | działają | | 14 wpisów wpisanych ręcznie; ruch widać ze wszystkich ośmiu hostów |
+| ergo.beautypolisa.eu | mierzony | 2026-11-17 | trasa `ergo.beautypolisa.eu/*` dodana przez API Cloudflare (konektor MCP ma uprawnienie Workers Routes, którego nie ma token wranglera); pierwsze zdarzenie z `utm_*` potwierdzone w danych. Host jest Custom Domain Workera `gohestia` — trasa collectora działa przed nim, tak jak na rozwod.waw.pl |
 | przestrzeń KV `VISITOR_SALT` | utworzona | 2026-09-07 | `e3d7ef83448e4a5288b3cddedd31af6e` |
 | panel `/analityka` w HUB | wdrożony | 2026-09-10 | Pages buduje z `main`; wymaga `CF_ACCOUNT_ID` i `ANALYTICS_TOKEN` |
 | Web Vitals | działa | 2026-09-10 | pierwsze zgłoszenia z przeglądarek potwierdzone w danych |
