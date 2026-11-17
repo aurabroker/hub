@@ -23,12 +23,32 @@ export const MEASURED_HOSTS = [
 	'auraconsulting.pl',
 	'cyber.auraconsulting.pl',
 	'zarzad.auraconsulting.pl',
+	// Domena główna nie ma dziś strony (Worker „beautypolisa” usunięty 2026-09-07,
+	// apex bez rekordu DNS). Zostaje na liście, żeby nowa strona była liczona
+	// od pierwszego dnia — do tego czasu w danych są tylko skanery z kodem 530.
 	'beautypolisa.eu',
 	// Kalkulator ERGO Razem (Worker „gohestia” na własnej domenie). Tu lądują
 	// linki z mailingów BeautyPolisa, więc bez pomiaru kampanie e-mail miały
 	// w /utm/raport zero wejść.
 	'ergo.beautypolisa.eu',
+	'konsultacja.beautypolisa.eu',
+	'auraexpert.pl',
+	'ergo.auraexpert.pl',
+	// Ten sam kalkulator co ergo.beautypolisa.eu, drugi adres.
+	'go.auraexpert.pl',
 	'rozwod.waw.pl',
+	// Dzielnicowe strony kancelarii (Worker „kancelaria-worker”, każda z własną
+	// treścią). Razem mają więcej ruchu z Polski niż rozwod.waw.pl.
+	'rozwodbemowo.pl',
+	'rozwodbielany.pl',
+	'rozwodjablonna.pl',
+	'rozwodlegionowo.pl',
+	'rozwodlomianki.pl',
+	'rozwodmokotow.pl',
+	'rozwodochota.pl',
+	'rozwodtarchomin.pl',
+	'rozwodwola.pl',
+	'rozwodzoliborz.pl',
 	'grupowe.pro',
 	'gwarancje.pro'
 ] as const;

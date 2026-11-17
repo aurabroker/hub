@@ -407,13 +407,18 @@ export async function loadActiveHosts(win: Window): Promise<string[]> {
 /**
  * Porównanie serwisów: odsłony i odwiedzający na każdej ze stron.
  *
- * Sens ma tylko przy filtrze „wszystkie". Przy dziewięciu serwisach to pierwsza
+ * Sens ma tylko przy filtrze „wszystkie". Przy kilkunastu serwisach to pierwsza
  * rzecz, którą chce się zobaczyć: który z nich w ogóle żyje.
+ *
+ * Liczymy tylko udane odsłony bez sond skanerów — ten sam filtr co top strony.
+ * Bez niego beautypolisa.eu, który nie ma strony, wyglądał na żywy serwis:
+ * kilkaset „odsłon" to były wyłącznie skanery z kodem 530. Ta lista decyduje
+ * też o tym, które hosty dostają przycisk filtra w panelu.
  */
 export async function loadHostBreakdown(win: Window): Promise<HostRow[]> {
 	const rows = await runQuery(
 		`SELECT blob1 AS host, SUM(_sample_interval) AS odslony, COUNT(DISTINCT blob8) AS unikalni
-       FROM ${DATASET} WHERE ${where(win, null, 'pageview')}${WITHOUT_BOTS}
+       FROM ${DATASET} WHERE ${where(win, null, 'pageview')}${WITHOUT_BOTS} AND ${HTTP_SUCCESS}${WITHOUT_PROBES}
        GROUP BY host ORDER BY odslony DESC`
 	);
 	return rows.map((r) => ({
