@@ -71,15 +71,14 @@ Jeśli trzeba coś dodać, dokładamy na końcu. Nigdy w środku.
 | auraconsulting.pl | auraconsulting.pl | apex przekierowuje na www, które łapie trasa `*.auraconsulting.pl/*` |
 | cyber.auraconsulting.pl | auraconsulting.pl | |
 | zarzad.auraconsulting.pl | auraconsulting.pl | |
-| beautypolisa.eu | beautypolisa.eu | **dziś bez strony** — patrz niżej |
+| beautypolisa.eu | beautypolisa.eu | strona w budowie — patrz niżej |
 | ergo.beautypolisa.eu | beautypolisa.eu | kalkulator ERGO Razem, cel linków z mailingów |
 | konsultacja.beautypolisa.eu | beautypolisa.eu | |
 | auraexpert.pl | auraexpert.pl | trasa tylko na apex, bez gwiazdki (w strefie są hub i pliki) |
 | ergo.auraexpert.pl | auraexpert.pl | |
 | go.auraexpert.pl | auraexpert.pl | ten sam kalkulator co ergo.beautypolisa.eu |
 | rozwod.waw.pl | rozwod.waw.pl | |
-| rozwodbemowo.pl, rozwodbielany.pl, rozwodjablonna.pl, rozwodlegionowo.pl, rozwodlomianki.pl, rozwodmokotow.pl, rozwodtarchomin.pl, rozwodwola.pl, rozwodzoliborz.pl | własne strefy | dzielnicowe strony kancelarii (`kancelaria-worker`), apex + www |
-| rozwodochota.pl | rozwodochota.pl | **tylko www** — apex ma trasę Workera `security-headers`, a jedna trasa to jeden Worker |
+| rozwodbemowo.pl, rozwodbielany.pl, rozwodjablonna.pl, rozwodlegionowo.pl, rozwodlomianki.pl, rozwodmokotow.pl, rozwodochota.pl, rozwodtarchomin.pl, rozwodwola.pl, rozwodzoliborz.pl | własne strefy | dzielnicowe strony kancelarii (`kancelaria-worker`), apex + www |
 | grupowe.pro | grupowe.pro | |
 | gwarancje.pro | gwarancje.pro | |
 
@@ -87,16 +86,15 @@ Celowo **nie są** mierzone: `hub.auraexpert.pl` (panel wewnętrzny — jego ruc
 zaśmiecałby statystyki klientów) i inne aplikacje oraz zasoby: `pliki.`,
 `wnioski.`, `banery.auraexpert.pl`, `portal.`, `podglad.beautypolisa.eu`,
 `app.gwarancje.pro`, `app.utratadochodu.pl`, `crm.`/`cms.auraconsulting.pl`.
-Poza kontem Cloudflare, więc poza zasięgiem collectora: `beautyrazem.pl`.
 
-**beautypolisa.eu nie ma dziś strony.** Worker `beautypolisa` został usunięty
-2026-09-07 razem ze swoją Custom Domain i apex nie ma rekordu A/AAAA/CNAME.
-Wszystkie zdarzenia tego hosta w Analytics Engine to skanery z kodem 530.
-Host zostaje na liście, a trasy `beautypolisa.eu/*` i `www.beautypolisa.eu/*`
-są założone, żeby nowa strona (dziś podgląd za hasłem na
-`podglad.beautypolisa.eu`) liczyła się od pierwszego dnia — wystarczy podpiąć
-jej Workera jako Custom Domain apexu. Sekcja „Serwisy” liczy tylko udane
-odsłony, więc host bez strony się w niej nie pokazuje.
+**beautypolisa.eu jest w budowie i celowo nie ma jeszcze strony** (apex bez
+rekordu A/AAAA/CNAME; poprzedni Worker zdjęty 2026-09-07). Do startu jedyne
+zdarzenia tego hosta to skanery z kodem 530. Host zostaje na liście, a trasy
+`beautypolisa.eu/*` i `www.beautypolisa.eu/*` są założone, żeby nowa strona
+(dziś podgląd za hasłem na `podglad.beautypolisa.eu`) liczyła się od pierwszego
+dnia — wystarczy podpiąć jej Workera jako Custom Domain apexu (i www, jeśli ma
+działać). Sekcja „Serwisy” liczy tylko udane odsłony, więc do startu host się
+w niej nie pokazuje.
 
 Ta lista jest **wpisana na sztywno** w `src/lib/analytics.ts` (`MEASURED_HOSTS`),
 skąd importuje ją collector (i panel). Ruch na
@@ -375,8 +373,8 @@ odpowiedzi. Decyzję podjął człowiek, nie agent.
 | Element | Status | Data | Uwagi |
 |---|---|---|---|
 | collector Worker | wdrożony | 2026-09-10 | `aura-analytics-collector`, workers.dev wyłączony |
-| trasy na mierzonych hostach | działają | 2026-11-17 | 38 tras = lista w `wrangler.jsonc`. 11 założonych ręcznie 2026-09-07, 27 przez API 2026-11-17 (ergo, konsultacja, auraexpert.pl ×3, www.rozwod.waw.pl, 10 dzielnicowych domen kancelarii z www, www.utratadochodu.pl i www.beautypolisa.eu zawczasu). Collector po zmianie: 0 błędów |
-| beautypolisa.eu | bez strony | 2026-09-07 | Worker strony usunięty, apex bez DNS; w danych tylko skanery z kodem 530 |
+| trasy na mierzonych hostach | działają | 2026-11-17 | 39 tras = lista w `wrangler.jsonc`. 11 założonych ręcznie 2026-09-07, 28 przez API 2026-11-17 (ergo, konsultacja, auraexpert.pl ×3, www.rozwod.waw.pl, 10 dzielnicowych domen kancelarii z www, www.utratadochodu.pl i www.beautypolisa.eu zawczasu). Trasa `rozwodochota.pl/*` Workera `security-headers` zdjęta na rzecz collectora (decyzja właściciela) — ten Worker nie ma już żadnej trasy. Collector po zmianie: 0 błędów |
+| beautypolisa.eu | w budowie | | strona celowo jeszcze nie działa; trasy gotowe na start |
 | przestrzeń KV `VISITOR_SALT` | utworzona | 2026-09-07 | `e3d7ef83448e4a5288b3cddedd31af6e` |
 | panel `/analityka` w HUB | wdrożony | 2026-09-10 | Pages buduje z `main`; wymaga `CF_ACCOUNT_ID` i `ANALYTICS_TOKEN` |
 | Web Vitals | działa | 2026-09-10 | pierwsze zgłoszenia z przeglądarek potwierdzone w danych |

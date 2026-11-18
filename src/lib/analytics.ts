@@ -23,9 +23,9 @@ export const MEASURED_HOSTS = [
 	'auraconsulting.pl',
 	'cyber.auraconsulting.pl',
 	'zarzad.auraconsulting.pl',
-	// Domena główna nie ma dziś strony (Worker „beautypolisa” usunięty 2026-09-07,
-	// apex bez rekordu DNS). Zostaje na liście, żeby nowa strona była liczona
-	// od pierwszego dnia — do tego czasu w danych są tylko skanery z kodem 530.
+	// Strona główna jest w budowie i celowo jeszcze nie działa (apex bez DNS).
+	// Host i trasy są gotowe, żeby nowa strona liczyła się od pierwszego dnia —
+	// do tego czasu w danych są tylko skanery z kodem 530.
 	'beautypolisa.eu',
 	// Kalkulator ERGO Razem (Worker „gohestia” na własnej domenie). Tu lądują
 	// linki z mailingów BeautyPolisa, więc bez pomiaru kampanie e-mail miały
