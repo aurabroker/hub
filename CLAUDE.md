@@ -84,6 +84,7 @@ Jeśli trzeba coś dodać, dokładamy na końcu. Nigdy w środku.
 
 Celowo **nie są** mierzone: `hub.auraexpert.pl` (panel wewnętrzny — jego ruch
 zaśmiecałby statystyki klientów) i inne aplikacje oraz zasoby: `pliki.`,
+`media.` (kubełek R2 z grafikami do maili, sekcja `/media`),
 `wnioski.`, `banery.auraexpert.pl`, `portal.`, `podglad.beautypolisa.eu`,
 `app.gwarancje.pro`, `app.utratadochodu.pl`, `crm.`/`cms.auraconsulting.pl`.
 

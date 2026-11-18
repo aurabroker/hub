@@ -17,6 +17,8 @@ declare global {
 		/** Kontekst runtime Cloudflare Workers (adapter-cloudflare). */
 		interface Platform {
 			context?: { waitUntil(promise: Promise<unknown>): void };
+			/** Bindingi projektu Pages. MEDIA = kubełek R2 `aura-media` (sekcja /media). */
+			env?: { MEDIA?: import('$lib/server/media').R2BucketLike };
 		}
 	}
 }

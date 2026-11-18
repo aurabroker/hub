@@ -58,6 +58,7 @@ linki UTM).
 | `/campaigns` | Kampanie masowe: kreator (segment → kategoria → podgląd), dashboard wysyłki (postęp, statusy per odbiorca, ponowienie nieudanych) |
 | `/sms-export` | **EKSPORT SMS (CSV)** — plik kontaktów do importu w SMSAPI (średnik, numery `48XXXXXXXXX`): filtry kategorii, bez sprzeciwu RODO, tylko komórki, deduplikacja; podgląd przed pobraniem |
 | `/library` | Biblioteka załączników: upload do prywatnego bucketa, przypinanie do kategorii, pobieranie (signed URL), usuwanie |
+| `/media` | Media do maili: grafiki i PDF-y pod stałym publicznym adresem `https://media.auraexpert.pl/<folder>/<nazwa>` — wgrywanie, podmiana, usuwanie (opis niżej) |
 | `/categories` | Konfiguracja sekcji: szablon Resend, temat, nadawca, tryb plików (załączniki albo linki do pobrania), aktywność, dodawanie sekcji oraz **automat** — wysyłka do nowych zapisów sekcji od daty startu `auto_send_since` (puste = od włączenia; starsza baza jest pomijana) |
 | `/messages` | **Historia wysyłek** — log wiadomości z filtrami (adres / status / źródło / sekcja); „Przetwórz kolejkę”, gdy coś w niej czeka; „Uzupełnij statystyki z Resend” dla maili sprzed subskrypcji webhooka (partie po 25, daty przybliżone) |
 | `/duplicates` | Grupy duplikatów wg e-mail / NIP z akcją „oznacz” (nic nie jest usuwane automatycznie) |
@@ -247,6 +248,47 @@ konfiguracja Resend. Sprawdź po kolei:
 Uwaga: open tracking bywa niedokładny (blokowanie obrazków, prefetch, Apple Mail Privacy
 Protection, przycinanie w Gmailu) — kliknięcia to pewniejszy sygnał; dashboard opisuje
 otwarcia jako orientacyjne.
+
+## Media do maili (`/media`)
+
+Grafiki (nagłówki, zdjęcia, logotypy) i publiczne PDF-y, do których linkują maile.
+Każdy plik ma stały adres `https://media.auraexpert.pl/<folder>/<nazwa>.<rozszerzenie>`.
+
+| Element | Gdzie |
+|---|---|
+| Magazyn | kubełek R2 `aura-media` (konto Cloudflare, lokalizacja WEUR) |
+| Adres publiczny | własna domena kubełka `media.auraexpert.pl` — odczyt nie przechodzi przez HUB, więc obrazki w wysłanych mailach działają także przy awarii panelu; transfer z R2 jest bezpłatny |
+| Zapis z HUB | binding `MEDIA` → `aura-media` w projekcie Pages `hub` (production i preview); zmiana bindingu wymaga redeployu |
+| Kod | `src/lib/media.ts` (nazwy, typy, klucze — testy w `media.test.ts`), `src/lib/server/media.ts` (R2), `src/routes/media/` |
+
+Zasady:
+
+- **Wszystko w kubełku jest publiczne.** Żadnych danych osobowych, polis ani umów — do tego
+  jest prywatna Biblioteka załączników (`/library`, signed URL).
+- Typ rozpoznawany po zawartości pliku: JPG, PNG, GIF, PDF. **Bez SVG** — na publicznej
+  domenie to furtka do XSS, a klienci pocztowi i tak go nie pokazują. **Bez WebP** — Outlook
+  na Windows (silnik Worda) i starsze Apple Mail go nie wyświetlają. Limit 10 MB; panel
+  ostrzega, gdy grafika ma ponad 500 KB, i pokazuje jej wymiary.
+- Zdjęcie JPEG z lokalizacją GPS w EXIF jest odrzucane — byłaby publicznie widoczna.
+- „Kopiuj kod obrazka” daje znacznik `<img>` z `width="536"` (kolumna treści maila z edytora
+  HUB). Outlook na Windows ignoruje CSS i bez atrybutu `width` rysuje obrazek w pełnym
+  rozmiarze, rozpychając maila.
+- Adres składa się z folderu (marka) i nazwy: małe litery ASCII, cyfry, myślniki; polskie znaki
+  są transliterowane.
+- **Bez cichego nadpisywania.** Wgranie pliku pod zajęty adres jest odrzucane — adres mógł już
+  pójść w mailu. Wymiana tylko świadomie, przyciskiem „Podmień” (z potwierdzeniem), i tylko na
+  plik tego samego typu (rozszerzenie w adresie musi się zgadzać z zawartością).
+- `Cache-Control: public, max-age=600`. Podmiana ani usunięcie nie czyszczą pamięci podręcznej
+  Cloudflare, więc stara wersja może być serwowana do 10 minut. Skrzynki, które już pobrały
+  obrazek (Gmail, Apple Mail), mogą pokazywać starą wersję dłużej — błędu w wysłanym mailu nie
+  naprawia się podmianą, tylko korektą.
+- Usunięcie pliku zostawia w wysłanych mailach pustą ramkę (obrazek) albo martwy link (PDF).
+  Serwer usuwa tylko z potwierdzeniem z okna dialogowego — formularz wysłany przed
+  załadowaniem skryptów nic nie skasuje. R2 nie ma wersjonowania: usuniętego pliku nie
+  da się odzyskać.
+
+Starsze grafiki BeautyPolisy leżą nadal pod `pliki.auraexpert.pl/media/beautypolisa/…` (CRM,
+lista plików wpisana w kodzie repozytorium `crmaura`). Nowe wgrywamy tutaj.
 
 ## Moduł UTM
 
