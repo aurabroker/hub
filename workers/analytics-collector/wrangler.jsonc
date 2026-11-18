@@ -29,10 +29,11 @@
 	//   założone ręcznie; łapią www i wewnętrzne aplikacje (crm, app), ale
 	//   collector nic nie zapisuje dla hostów spoza MEASURED_HOSTS.
 	// - W strefie auraexpert.pl celowo BEZ gwiazdki: tam są hub i pliki.
-	// - rozwodochota.pl/* należy do Workera security-headers (jedna trasa =
-	//   jeden Worker), więc z tej domeny mierzymy tylko www.
+	// - rozwodochota.pl/* należała do Workera security-headers; 2026-11-17
+	//   trasa przeszła na collector (decyzja właściciela).
 	// - www.utratadochodu.pl, www.beautypolisa.eu: dziś bez DNS; trasy są
 	//   założone zawczasu, żeby www liczyło się od chwili dodania rekordu.
+	//   beautypolisa.eu jest w budowie i celowo nie ma jeszcze strony.
 	"routes": [
 		{ "pattern": "utratadochodu.pl/*", "zone_name": "utratadochodu.pl" },
 		{ "pattern": "www.utratadochodu.pl/*", "zone_name": "utratadochodu.pl" },
@@ -61,6 +62,7 @@
 		{ "pattern": "www.rozwodlomianki.pl/*", "zone_name": "rozwodlomianki.pl" },
 		{ "pattern": "rozwodmokotow.pl/*", "zone_name": "rozwodmokotow.pl" },
 		{ "pattern": "www.rozwodmokotow.pl/*", "zone_name": "rozwodmokotow.pl" },
+		{ "pattern": "rozwodochota.pl/*", "zone_name": "rozwodochota.pl" },
 		{ "pattern": "www.rozwodochota.pl/*", "zone_name": "rozwodochota.pl" },
 		{ "pattern": "rozwodtarchomin.pl/*", "zone_name": "rozwodtarchomin.pl" },
 		{ "pattern": "www.rozwodtarchomin.pl/*", "zone_name": "rozwodtarchomin.pl" },
