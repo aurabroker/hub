@@ -538,6 +538,32 @@ reguł, które łatwo złamać przy dokładaniu kolejnego ekranu.
 - Szybka wysyłka 1-do-1 jest inicjowana ręcznie przez operatora; również zawiera link
   wypisu i jest logowana.
 
+### Lista blokad (żądanie usunięcia danych)
+
+Gdy ktoś żąda usunięcia danych, kontakt kasujemy z bazy, a jego adres trafia na listę
+blokad `public.email_blocklist` (migracja `20261121150000_email_blocklist.sql`). Bez niej
+baza nie pamięta, że tej osoby nie wolno ponownie dodać ani mailować.
+
+- Na liście jest **tylko skrót SHA-256** znormalizowanego adresu (`public.email_sha256`:
+  małe litery, bez spacji na brzegach), nie sam adres.
+- Blokada działa w bazie, bo kontakty trafiają do `crm_companies` także spoza kodu HUB
+  (formularze, importy). Wstawienie kontaktu z zablokowanym adresem jest po cichu
+  pomijane, a zmiana adresu istniejącego kontaktu na zablokowany kończy się błędem.
+- Druga zapora: wiadomość do zablokowanego adresu dostaje od razu `skipped` z powodem
+  „Adres na liście blokad”, zamiast trafić do kolejki. Dotyczy kampanii, automatu,
+  szybkiej wysyłki 1-do-1, ponowień i wznowienia anulowanej kampanii.
+- Dodanie adresu (adres pojawia się tylko w zapytaniu, w tabeli zostaje skrót):
+
+  ```sql
+  insert into public.email_blocklist (email_sha256)
+  values (public.email_sha256('adres@example.com')) on conflict do nothing;
+  ```
+
+- Usunięcie danych to osobny krok: kontakt w `crm_companies` (kaskadowo historia CRM),
+  wiadomości w `email_messages` (kaskadowo załączniki), a w `crm_audit_log` zostaje kopia
+  usuniętego wiersza, którą trzeba wyczyścić z danych osobowych. Historii wysyłek
+  w Resend z HUB nie usuniemy.
+
 ## Limity i pułapki
 
 > ### ⚠️ PostgREST tnie odpowiedzi do 1000 wierszy (`db_max_rows`)
